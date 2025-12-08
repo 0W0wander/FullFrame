@@ -1,0 +1,47 @@
+﻿# Build directories
+build/
+bin/
+lib/
+dist/
+
+# Release archives
+*.zip
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.obj
+*.pdb
+x64/
+Debug/
+Release/
+
+# Qt
+*.pro.user
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+FullFrame_autogen/
+
+# IDEs
+.cursor/
+.vscode/
+.idea/
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# Project specific
+FullFrame - Copy/
+build_history.ps1

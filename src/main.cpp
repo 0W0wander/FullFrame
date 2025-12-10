@@ -1,14 +1,16 @@
 ﻿#include <QApplication>
-#include <QMainWindow>
+#include <QStyleFactory>
+#include "mainwindow.h"
+
+using namespace FullFrame;
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     app.setApplicationName("FullFrame");
+    app.setStyle(QStyleFactory::create("Fusion"));
     
-    QMainWindow window;
-    window.setWindowTitle("FullFrame");
-    window.setMinimumSize(800, 600);
+    MainWindow window;
     window.show();
     
     return app.exec();

@@ -1,79 +1,274 @@
-﻿#include "thumbnaildelegate.h"
+/**
+ * ThumbnailDelegate implementation
+ * 
+ * Optimized painting for smooth scrolling
+ */
+
+#include "thumbnaildelegate.h"
+#include "imagethumbnailmodel.h"
+
 #include <QPainter>
+#include <QApplication>
+#include <QPainterPath>
 
 namespace FullFrame {
 
 ThumbnailDelegate::ThumbnailDelegate(QObject* parent)
     : QStyledItemDelegate(parent)
+    , m_selectionColor(0, 120, 215)      // Windows accent blue
+    , m_hoverColor(255, 255, 255, 30)    // Subtle white overlay
+    , m_tagIndicatorColor(76, 175, 80)   // Material green
+    , m_backgroundColor(30, 30, 30)       // Dark background
+    , m_textColor(200, 200, 200)         // Light gray text
 {
 }
 
 ThumbnailDelegate::~ThumbnailDelegate() = default;
 
-void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
-                              const QModelIndex& index) const
+void ThumbnailDelegate::setThumbnailSize(int size)
 {
+    if (m_thumbnailSize != size) {
+        m_thumbnailSize = size;
+        Q_EMIT sizeHintChanged();
+    }
+}
+
+void ThumbnailDelegate::setSpacing(int spacing)
+{
+    if (m_spacing != spacing) {
+        m_spacing = spacing;
+        Q_EMIT sizeHintChanged();
+    }
+}
+
+void ThumbnailDelegate::setShowFilename(bool show)
+{
+    if (m_showFilename != show) {
+        m_showFilename = show;
+        Q_EMIT sizeHintChanged();
+    }
+}
+
+void ThumbnailDelegate::setShowTagIndicator(bool show)
+{
+    m_showTagIndicator = show;
+}
+
+// ============== Painting ==============
+
+void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+                               const QModelIndex& index) const
+{
+    // Only set render hints once for batch painting - significantly reduces overhead
+    // Antialiasing is only needed for rounded corners, SmoothPixmapTransform for scaling
+    const bool needsAntialiasing = true;  // For rounded corners
+    
     painter->save();
     
+    // Background - no render hints needed
+    QRect itemRect = option.rect;
+    painter->fillRect(itemRect, m_backgroundColor);
+
+    // Calculate thumbnail rect (centered with spacing)
+    int thumbX = itemRect.x() + m_spacing;
+    int thumbY = itemRect.y() + m_spacing;
+    QRect thumbRect(thumbX, thumbY, m_thumbnailSize, m_thumbnailSize);
+
+    // Get thumbnail pixmap - use type() check to avoid expensive canConvert
+    QVariant thumbVar = index.data(Qt::DecorationRole);
+    if (thumbVar.userType() == QMetaType::QPixmap) {
+        QPixmap pixmap = thumbVar.value<QPixmap>();
+        if (!pixmap.isNull()) {
+            // Only enable smooth transform for actual pixmap drawing
+            painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+            paintThumbnail(painter, thumbRect, pixmap);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
+        } else {
+            painter->fillRect(thumbRect, QColor(50, 50, 50));
+        }
+    }
+
+    // Selection effects - needs antialiasing for smooth borders
     bool selected = option.state & QStyle::State_Selected;
-    
-    // Background
     if (selected) {
-        painter->fillRect(option.rect, QColor(0, 120, 215, 50));
-        painter->setPen(QPen(QColor(0, 120, 215), 2));
-        painter->drawRect(option.rect.adjusted(1, 1, -1, -1));
+        painter->setRenderHint(QPainter::Antialiasing, needsAntialiasing);
+        paintSelection(painter, thumbRect, option);
     }
-    
-    // Thumbnail
-    QVariant thumbData = index.data(Qt::DecorationRole);
-    if (thumbData.canConvert<QPixmap>()) {
-        QPixmap pixmap = thumbData.value<QPixmap>();
-        QRect thumbRect = option.rect.adjusted(4, 4, -4, -24);
-        paintThumbnail(painter, thumbRect, pixmap, selected);
+
+    // Tag badges - needs antialiasing for rounded rects
+    QVariantList tagList = index.data(TagListRole).toList();
+    if (!tagList.isEmpty()) {
+        painter->setRenderHint(QPainter::Antialiasing, needsAntialiasing);
+        paintTagBadges(painter, thumbRect, tagList);
     }
-    
-    // File name
-    QString name = index.data(Qt::DisplayRole).toString();
-    QRect nameRect = option.rect;
-    nameRect.setTop(nameRect.bottom() - 20);
-    paintFileName(painter, nameRect, name, selected);
-    
+
+    // Filename - no antialiasing needed for text
+    if (m_showFilename) {
+        QRect filenameRect(
+            itemRect.x() + m_spacing,
+            itemRect.y() + m_spacing + m_thumbnailSize + 4,
+            m_thumbnailSize,
+            m_filenameHeight
+        );
+        QString filename = index.data(FileNameRole).toString();
+        paintFilename(painter, filenameRect, filename);
+    }
+
     painter->restore();
 }
 
-QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option,
-                                   const QModelIndex& index) const
-{
-    Q_UNUSED(index)
-    return option.decorationSize + QSize(8, 28);
-}
-
 void ThumbnailDelegate::paintThumbnail(QPainter* painter, const QRect& rect,
-                                        const QPixmap& pixmap, bool selected) const
+                                        const QPixmap& pixmap) const
 {
-    Q_UNUSED(selected)
+    // Calculate scaled size maintaining aspect ratio
+    QSize pixmapSize = pixmap.size();
+    QSize targetSize = pixmapSize.scaled(rect.size(), Qt::KeepAspectRatio);
     
-    if (pixmap.isNull()) {
-        painter->fillRect(rect, QColor(45, 45, 45));
-        return;
-    }
-    
-    QPixmap scaled = pixmap.scaled(rect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    int x = rect.x() + (rect.width() - scaled.width()) / 2;
-    int y = rect.y() + (rect.height() - scaled.height()) / 2;
-    painter->drawPixmap(x, y, scaled);
+    // Center in rect
+    int x = rect.x() + (rect.width() - targetSize.width()) / 2;
+    int y = rect.y() + (rect.height() - targetSize.height()) / 2;
+    QRect targetRect(x, y, targetSize.width(), targetSize.height());
+
+    // Draw with rounded corners - use simple clipping for performance
+    QPainterPath path;
+    path.addRoundedRect(targetRect, 4, 4);
+    painter->setClipPath(path);
+    painter->drawPixmap(targetRect, pixmap);
+    painter->setClipping(false);
 }
 
-void ThumbnailDelegate::paintFileName(QPainter* painter, const QRect& rect,
-                                       const QString& name, bool selected) const
+void ThumbnailDelegate::paintSelection(QPainter* painter, const QRect& rect,
+                                        const QStyleOptionViewItem& option) const
 {
-    painter->setPen(selected ? QColor(255, 255, 255) : QColor(180, 180, 180));
+    bool selected = option.state & QStyle::State_Selected;
+    // Disabled hover effect to prevent flickering
+    // bool hovered = option.state & QStyle::State_MouseOver;
+
+    if (selected) {
+        // Selection border
+        painter->setPen(QPen(m_selectionColor, 3));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 6, 6);
+        
+        // Selection overlay
+        painter->fillRect(rect, QColor(m_selectionColor.red(), 
+                                       m_selectionColor.green(), 
+                                       m_selectionColor.blue(), 40));
+    }
+    // Hover effect disabled to prevent flickering
+}
+
+void ThumbnailDelegate::paintFilename(QPainter* painter, const QRect& rect,
+                                       const QString& filename) const
+{
+    painter->setPen(m_textColor);
+    
     QFont font = painter->font();
     font.setPointSize(9);
     painter->setFont(font);
     
-    QString elidedName = painter->fontMetrics().elidedText(name, Qt::ElideMiddle, rect.width() - 8);
-    painter->drawText(rect, Qt::AlignCenter, elidedName);
+    // Elide text if too long
+    QFontMetrics fm(font);
+    QString elidedText = fm.elidedText(filename, Qt::ElideMiddle, rect.width());
+    
+    painter->drawText(rect, Qt::AlignHCenter | Qt::AlignTop, elidedText);
+}
+
+void ThumbnailDelegate::paintTagIndicator(QPainter* painter, const QRect& rect,
+                                           bool hasTags) const
+{
+    Q_UNUSED(painter)
+    Q_UNUSED(rect)
+    Q_UNUSED(hasTags)
+    // Deprecated - now using paintTagBadges instead
+}
+
+void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
+                                        const QVariantList& tags) const
+{
+    if (tags.isEmpty()) {
+        return;
+    }
+
+    QFont badgeFont = painter->font();
+    badgeFont.setPointSize(8);
+    badgeFont.setBold(true);
+    painter->setFont(badgeFont);
+    QFontMetrics fm(badgeFont);
+
+    int badgeHeight = 16;
+    int badgePadding = 6;
+    int badgeSpacing = 3;
+    int badgeRadius = 3;
+    int margin = 4;
+
+    // Start from bottom-left of the thumbnail, going right
+    int x = rect.left() + margin;
+    int y = rect.bottom() - badgeHeight - margin;
+    int maxX = rect.right() - margin;
+
+    for (const QVariant& tagVar : tags) {
+        QVariantMap tagInfo = tagVar.toMap();
+        QString name = tagInfo["name"].toString();
+        QString colorStr = tagInfo["color"].toString();
+        
+        // Calculate badge width
+        int textWidth = fm.horizontalAdvance(name);
+        int badgeWidth = textWidth + badgePadding * 2;
+        
+        // Check if we have room for this badge
+        if (x + badgeWidth > maxX) {
+            // Show "..." indicator if we can't fit all tags
+            if (x + 20 <= maxX) {
+                painter->setPen(Qt::white);
+                painter->drawText(x, y, 20, badgeHeight, Qt::AlignCenter, "...");
+            }
+            break;
+        }
+        
+        QRect badgeRect(x, y, badgeWidth, badgeHeight);
+        
+        // Determine badge color
+        QColor bgColor = colorStr.isEmpty() ? QColor(100, 100, 100) : QColor(colorStr);
+        
+        // Draw badge background with slight transparency
+        painter->setPen(Qt::NoPen);
+        QColor fillColor = bgColor;
+        fillColor.setAlpha(220);
+        painter->setBrush(fillColor);
+        painter->drawRoundedRect(badgeRect, badgeRadius, badgeRadius);
+        
+        // Draw text - use white or black depending on background brightness
+        int brightness = (bgColor.red() * 299 + bgColor.green() * 587 + bgColor.blue() * 114) / 1000;
+        painter->setPen(brightness > 128 ? Qt::black : Qt::white);
+        painter->drawText(badgeRect, Qt::AlignCenter, name);
+        
+        x += badgeWidth + badgeSpacing;
+    }
+}
+
+void ThumbnailDelegate::paintHoverEffect(QPainter* painter, const QRect& rect) const
+{
+    painter->fillRect(rect, m_hoverColor);
+}
+
+// ============== Size Hint ==============
+
+QSize ThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option,
+                                   const QModelIndex& index) const
+{
+    Q_UNUSED(option)
+    Q_UNUSED(index)
+
+    int width = m_thumbnailSize + m_spacing * 2;
+    int height = m_thumbnailSize + m_spacing * 2;
+    
+    if (m_showFilename) {
+        height += m_filenameHeight + 4;
+    }
+
+    return QSize(width, height);
 }
 
 } // namespace FullFrame
+

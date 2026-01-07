@@ -1,4 +1,4 @@
-﻿# Build directories
+# Build directories
 build/
 bin/
 lib/
@@ -13,6 +13,7 @@ CMakeFiles/
 cmake_install.cmake
 install_manifest.txt
 Makefile
+CTestTestfile.cmake
 
 # Visual Studio
 .vs/
@@ -20,18 +21,39 @@ Makefile
 *.vcxproj
 *.vcxproj.filters
 *.vcxproj.user
+*.props
+*.sdf
+*.opensdf
+*.ipch
+*.tlog
+*.log
 *.obj
 *.pdb
+*.idb
+*.iobj
+*.ipdb
 x64/
 Debug/
 Release/
 
 # Qt
 *.pro.user
+*.pro.user.*
+*.moc
 moc_*.cpp
+moc_*.h
 qrc_*.cpp
 ui_*.h
+*.qrc.depends
 FullFrame_autogen/
+
+# DigiKam source (requested to be ignored)
+digikam-master/
+
+# SQLite databases
+*.db
+*.db-journal
+*.db-wal
 
 # IDEs
 .cursor/
@@ -40,8 +62,12 @@ FullFrame_autogen/
 
 # OS specific
 Thumbs.db
+Desktop.ini
 .DS_Store
 
-# Project specific
-FullFrame - Copy/
+
+# Build script
 build_history.ps1
+
+# Copy folder
+FullFrame - Copy/

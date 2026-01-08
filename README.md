@@ -1,35 +1,121 @@
-﻿# FullFrame - High-Performance Image Tagging Application
+# FullFrame - High-Performance Media Tagging Application
 
-A C++ Qt6-based image tagging application inspired by DigiKam.
+A fast, modern media tagging app built with C++ and Qt6. Inspired by DigiKam's efficient architecture, but built from the ground up to handle massive collections without slowing down.
 
 ## Features
 
-- Fast thumbnail loading for large image collections
-- Multi-threaded thumbnail generation
-- Smart caching (LRU memory cache + disk cache)
-- Tag-based organization with SQLite storage
-- Modern dark UI
-- Ctrl+Wheel zoom
+### Media Support
+- **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG, and more
+- **Videos**: MP4, MKV, WebM, MOV, AVI, WMV, 3GP, and 30+ other formats
+- **Audio**: MP3, M4A, WAV, FLAC, OGG, AAC, WMA
+- **Video Thumbnails**: Extracts actual frames from videos (requires FFmpeg)
+- **Audio Placeholders**: Nice looking placeholders for audio files
+
+### Performance
+- **Blazing Fast**: Load thousands of thumbnails without lag
+- **Multi-threaded**: Uses all your CPU cores for thumbnail generation
+- **Smart Caching**: LRU cache keeps frequently viewed items in memory
+- **Disk Caching**: FreeDesktop standard thumbnail cache (persists between sessions)
+- **Lazy Loading**: Only loads what you can see
+- **Preloading**: Automatically loads thumbnails just outside the viewport
+
+### Tagging System
+- **Create Tags**: Add custom tags with colors
+- **Tag Hotkeys**: Assign keyboard shortcuts to tags (press the key to tag!)
+- **Tag Filtering**: Click any tag to filter your collection
+- **Show Untagged**: Filter to see only files without tags
+- **Multi-select**: Tag multiple files at once
+- **Tag Autocomplete**: Type-ahead when adding tags
+
+### User Interface
+- **Dark Theme**: Easy on the eyes
+- **Zoom**: Ctrl+Wheel to zoom thumbnails in/out
+- **Drag & Drop**: Drop folders onto the window to open them
+- **Media Preview**: Click any file to see a larger preview
+- **Video Playback**: Play videos right in the app (if Qt Multimedia is installed)
+- **Audio Playback**: Play audio files in the app (if Qt Multimedia is installed)
 
 ## Building
 
 ### Requirements
 
-- CMake 3.16+
-- Qt 6.x (Core, Gui, Widgets, Concurrent, Sql)
-- C++17 compatible compiler
+- **CMake** 3.16 or newer
+- **Qt 6.x** (Core, Gui, Widgets, Concurrent, Sql)
+- **C++17** compatible compiler
+- **FFmpeg** (optional, for video thumbnails - will auto-detect if installed)
 
-### Build Steps
+### Windows (MSVC)
+
+```powershell
+# Configure (adjust Qt path as needed)
+cmake -B build -S . -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64"
+
+# Build
+cmake --build build --config Release
+
+# Run
+.\build\Release\FullFrame.exe
+```
+
+### Linux/macOS
 
 ```bash
+# Configure
 cmake -B build -S .
+
+# Build
 cmake --build build
+
+# Run
 ./build/FullFrame
 ```
 
 ## Usage
 
-1. Open a folder with images
-2. Browse thumbnails
-3. Create and assign tags
-4. Filter by tags
+1. **Open a Folder**: Click "Open Folder" or drag-drop a folder onto the window
+2. **Browse**: Scroll through your media. Use Ctrl+Wheel to zoom thumbnails
+3. **Tag Files**: 
+   - Select one or more files in the grid
+   - Type a tag name in the sidebar and click "+" (or press Enter)
+   - Or click an existing tag to apply it
+4. **Filter**: Click any tag in the sidebar to show only files with that tag
+5. **Show Untagged**: Click "⊘ Untagged" to see files without any tags
+
+## How It Works (Technical Stuff)
+
+The app uses several tricks to stay fast:
+
+1. **Thread Pool**: Parallel thumbnail generation across all CPU cores
+2. **LRU Cache**: Keeps 500 images + 200 pixmaps in memory by default
+3. **Disk Cache**: Thumbnails saved to `~/.cache/thumbnails` (FreeDesktop standard)
+4. **Batched Layout**: Processes 50 items at a time for smooth scrolling
+5. **Debounced Preloading**: 50ms delay prevents loading spam during fast scrolling
+6. **EXIF Thumbnails**: Uses embedded JPEG thumbnails when available (instant!)
+7. **FFmpeg Integration**: Extracts video frames for thumbnails (finds FFmpeg automatically)
+
+### Architecture
+
+- **ThumbnailCache**: Thread-safe image cache + main-thread pixmap cache
+- **ThumbnailLoadThread**: Background thread pool for parallel loading
+- **ThumbnailCreator**: Generates thumbnails (images, videos, audio)
+- **ImageThumbnailModel**: Efficient data model with tag filtering
+- **ImageGridView**: Lazy-loading grid view
+- **TagManager**: SQLite-based tag storage
+
+## Video Thumbnails
+
+FullFrame can extract actual frames from videos for thumbnails! It uses FFmpeg if available. The app will automatically find FFmpeg if it's:
+- In your PATH
+- Installed via WinGet
+- In common installation locations (C:\ffmpeg, Scoop, Chocolatey, etc.)
+
+If FFmpeg isn't found, videos will show a nice placeholder with a play button.
+
+## Coming Soon
+
+- **Tagging Mode**: A dedicated interface for bulk tagging operations
+- More features as we build them!
+
+## License
+
+MIT License - do whatever you want with it!

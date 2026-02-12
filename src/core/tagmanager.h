@@ -25,10 +25,12 @@ struct Tag
     QString name;
     QString color;
     QString hotkey;  // Single key like "1", "A", "F1", etc.
+    QString albumPath;  // Absolute path to album folder (empty for regular tags)
     qint64 parentId = -1;
     
     bool isValid() const { return id >= 0; }
     bool hasHotkey() const { return !hotkey.isEmpty(); }
+    bool isAlbumTag() const { return !albumPath.isEmpty(); }
 };
 
 /**
@@ -54,6 +56,13 @@ public:
     bool setTagColor(qint64 tagId, const QString& color);
     bool setTagHotkey(qint64 tagId, const QString& hotkey);
     bool clearTagHotkey(qint64 tagId);
+    
+    // Album tag support
+    bool setTagAlbumPath(qint64 tagId, const QString& albumPath);
+    bool clearTagAlbumPath(qint64 tagId);
+    
+    // Update image path (after file move)
+    bool updateImagePath(const QString& oldPath, const QString& newPath);
     
     // Tag queries
     Tag tag(qint64 tagId) const;
@@ -92,6 +101,8 @@ Q_SIGNALS:
     void tagHotkeyChanged(qint64 tagId, const QString& hotkey);
     void imageTagged(const QString& imagePath, qint64 tagId);
     void imageUntagged(const QString& imagePath, qint64 tagId);
+    void imagePathUpdated(const QString& oldPath, const QString& newPath);
+    void tagAlbumPathChanged(qint64 tagId, const QString& albumPath);
     void tagsChanged();
 
 private:

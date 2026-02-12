@@ -84,6 +84,9 @@ bool TagManager::createTables()
     
     // Add hotkey column if it doesn't exist (migration for existing databases)
     query.exec("ALTER TABLE tags ADD COLUMN hotkey TEXT");
+    
+    // Add album_path column if it doesn't exist (migration for existing databases)
+    query.exec("ALTER TABLE tags ADD COLUMN album_path TEXT");
 
     // Images table (stores image paths)
     if (!query.exec(R"(
@@ -258,7 +261,7 @@ Tag TagManager::tag(qint64 tagId) const
     }
 
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, color, hotkey, parent_id FROM tags WHERE id = ?");
+    query.prepare("SELECT id, name, color, hotkey, parent_id, album_path FROM tags WHERE id = ?");
     query.addBindValue(tagId);
 
     if (query.exec() && query.next()) {
@@ -268,6 +271,7 @@ Tag TagManager::tag(qint64 tagId) const
         t.color = query.value(2).toString();
         t.hotkey = query.value(3).toString();
         t.parentId = query.value(4).toLongLong();
+        t.albumPath = query.value(5).toString();
         m_tagCache.insert(tagId, t);
         return t;
     }
@@ -278,7 +282,7 @@ Tag TagManager::tag(qint64 tagId) const
 Tag TagManager::tagByName(const QString& name) const
 {
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, color, hotkey, parent_id FROM tags WHERE name = ?");
+    query.prepare("SELECT id, name, color, hotkey, parent_id, album_path FROM tags WHERE name = ?");
     query.addBindValue(name);
 
     if (query.exec() && query.next()) {
@@ -288,6 +292,7 @@ Tag TagManager::tagByName(const QString& name) const
         t.color = query.value(2).toString();
         t.hotkey = query.value(3).toString();
         t.parentId = query.value(4).toLongLong();
+        t.albumPath = query.value(5).toString();
         return t;
     }
 
@@ -301,7 +306,7 @@ Tag TagManager::tagByHotkey(const QString& hotkey) const
     }
     
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, color, hotkey, parent_id FROM tags WHERE hotkey = ?");
+    query.prepare("SELECT id, name, color, hotkey, parent_id, album_path FROM tags WHERE hotkey = ?");
     query.addBindValue(hotkey);
 
     if (query.exec() && query.next()) {
@@ -311,6 +316,7 @@ Tag TagManager::tagByHotkey(const QString& hotkey) const
         t.color = query.value(2).toString();
         t.hotkey = query.value(3).toString();
         t.parentId = query.value(4).toLongLong();
+        t.albumPath = query.value(5).toString();
         return t;
     }
 
@@ -321,7 +327,7 @@ QList<Tag> TagManager::allTags() const
 {
     QList<Tag> tags;
     QSqlQuery query(m_db);
-    query.exec("SELECT id, name, color, hotkey, parent_id FROM tags ORDER BY name");
+    query.exec("SELECT id, name, color, hotkey, parent_id, album_path FROM tags ORDER BY name");
 
     while (query.next()) {
         Tag t;
@@ -330,6 +336,7 @@ QList<Tag> TagManager::allTags() const
         t.color = query.value(2).toString();
         t.hotkey = query.value(3).toString();
         t.parentId = query.value(4).toLongLong();
+        t.albumPath = query.value(5).toString();
         tags.append(t);
         m_tagCache.insert(t.id, t);
     }
@@ -341,7 +348,7 @@ QList<Tag> TagManager::childTags(qint64 parentId) const
 {
     QList<Tag> tags;
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, name, color, hotkey, parent_id FROM tags WHERE parent_id = ? ORDER BY name");
+    query.prepare("SELECT id, name, color, hotkey, parent_id, album_path FROM tags WHERE parent_id = ? ORDER BY name");
     query.addBindValue(parentId);
 
     if (query.exec()) {
@@ -352,6 +359,7 @@ QList<Tag> TagManager::childTags(qint64 parentId) const
             t.color = query.value(2).toString();
             t.hotkey = query.value(3).toString();
             t.parentId = query.value(4).toLongLong();
+            t.albumPath = query.value(5).toString();
             tags.append(t);
         }
     }
@@ -460,7 +468,7 @@ QList<Tag> TagManager::tagsForImage(const QString& imagePath) const
 
     QSqlQuery query(m_db);
     query.prepare(R"(
-        SELECT t.id, t.name, t.color, t.hotkey, t.parent_id 
+        SELECT t.id, t.name, t.color, t.hotkey, t.parent_id, t.album_path 
         FROM tags t 
         JOIN image_tags it ON t.id = it.tag_id 
         WHERE it.image_id = ?
@@ -476,6 +484,7 @@ QList<Tag> TagManager::tagsForImage(const QString& imagePath) const
             t.color = query.value(2).toString();
             t.hotkey = query.value(3).toString();
             t.parentId = query.value(4).toLongLong();
+            t.albumPath = query.value(5).toString();
             tags.append(t);
         }
     }
@@ -628,6 +637,57 @@ bool TagManager::untagImages(const QStringList& imagePaths, qint64 tagId)
     m_db.commit();
     return success;
 }
+
+// ============== Album Tag Support ==============
+
+bool TagManager::setTagAlbumPath(qint64 tagId, const QString& albumPath)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE tags SET album_path = ? WHERE id = ?");
+    query.addBindValue(albumPath.isEmpty() ? QVariant() : albumPath);
+    query.addBindValue(tagId);
+
+    if (!query.exec()) {
+        return false;
+    }
+
+    if (m_tagCache.contains(tagId)) {
+        m_tagCache[tagId].albumPath = albumPath;
+    }
+
+    Q_EMIT tagAlbumPathChanged(tagId, albumPath);
+    Q_EMIT tagsChanged();
+    return true;
+}
+
+bool TagManager::clearTagAlbumPath(qint64 tagId)
+{
+    return setTagAlbumPath(tagId, QString());
+}
+
+bool TagManager::updateImagePath(const QString& oldPath, const QString& newPath)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE images SET path = ? WHERE path = ?");
+    query.addBindValue(newPath);
+    query.addBindValue(oldPath);
+
+    if (!query.exec()) {
+        qWarning() << "Failed to update image path:" << query.lastError().text();
+        return false;
+    }
+
+    // Update cache
+    if (m_imageTagCache.contains(oldPath)) {
+        QSet<qint64> tags = m_imageTagCache.take(oldPath);
+        m_imageTagCache.insert(newPath, tags);
+    }
+
+    Q_EMIT imagePathUpdated(oldPath, newPath);
+    return true;
+}
+
+// ============== Tag Image Counts ==============
 
 QHash<qint64, int> TagManager::tagImageCounts(const QStringList& imagePaths) const
 {

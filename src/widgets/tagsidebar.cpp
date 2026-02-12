@@ -19,6 +19,7 @@
 #include <QApplication>
 #include <QScrollBar>
 #include <QTimer>
+#include <QFileDialog>
 #include <algorithm>
 
 namespace FullFrame {
@@ -31,6 +32,7 @@ TagCard::TagCard(const Tag& tag, QWidget* parent)
     , m_name(tag.name)
     , m_hotkey(tag.hotkey)
     , m_color(tag.color.isEmpty() ? QColor(100, 100, 100) : QColor(tag.color))
+    , m_isAlbumTag(tag.isAlbumTag())
 {
     setFixedHeight(32);  // Compact height
     setCursor(Qt::PointingHandCursor);
@@ -54,6 +56,12 @@ void TagCard::setHotkey(const QString& hotkey)
 void TagCard::setAwaitingHotkey(bool awaiting)
 {
     m_awaitingHotkey = awaiting;
+    update();
+}
+
+void TagCard::setAlbumTag(bool isAlbum)
+{
+    m_isAlbumTag = isAlbum;
     update();
 }
 
@@ -84,12 +92,21 @@ void TagCard::paintEvent(QPaintEvent* event)
         painter.drawRoundedRect(r, 4, 4);
     }
     
-    // Color dot on left (small)
+    // Color dot or folder icon on left
     int dotSize = 8;
     int dotY = r.top() + (r.height() - dotSize) / 2;
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_color);
-    painter.drawEllipse(r.left() + 8, dotY, dotSize, dotSize);
+    if (m_isAlbumTag) {
+        // Draw folder icon for album tags
+        QFont iconFont = painter.font();
+        iconFont.setPixelSize(12);
+        painter.setFont(iconFont);
+        painter.setPen(m_color);
+        painter.drawText(QRect(r.left() + 5, r.top(), 16, r.height()), Qt::AlignCenter, QString::fromUtf8("\xF0\x9F\x93\x81"));
+    } else {
+        painter.drawEllipse(r.left() + 8, dotY, dotSize, dotSize);
+    }
     
     // Hotkey badge (right side) - compact
     int badgeW = 20;
@@ -175,6 +192,19 @@ void TagCard::contextMenuEvent(QContextMenuEvent* event)
     QMenu menu(this);
     
     QAction* renameAction = menu.addAction("Rename");
+    
+    menu.addSeparator();
+    
+    QAction* linkAction = nullptr;
+    QAction* unlinkAction = nullptr;
+    if (m_isAlbumTag) {
+        unlinkAction = menu.addAction("Unlink from Folder");
+    } else {
+        linkAction = menu.addAction("Link to Folder...");
+    }
+    
+    menu.addSeparator();
+    
     QAction* deleteAction = menu.addAction("Delete");
     
     QAction* chosen = menu.exec(event->globalPos());
@@ -182,6 +212,10 @@ void TagCard::contextMenuEvent(QContextMenuEvent* event)
         Q_EMIT renameRequested(m_tagId);
     } else if (chosen == deleteAction) {
         Q_EMIT deleteRequested(m_tagId);
+    } else if (linkAction && chosen == linkAction) {
+        Q_EMIT linkToFolderRequested(m_tagId);
+    } else if (unlinkAction && chosen == unlinkAction) {
+        Q_EMIT unlinkFromFolderRequested(m_tagId);
     }
 }
 
@@ -553,6 +587,8 @@ void TagSidebar::updateTagCards()
         connect(card, &TagCard::hotkeyClicked, this, &TagSidebar::onHotkeyClicked);
         connect(card, &TagCard::deleteRequested, this, &TagSidebar::onDeleteRequested);
         connect(card, &TagCard::renameRequested, this, &TagSidebar::onRenameRequested);
+        connect(card, &TagCard::linkToFolderRequested, this, &TagSidebar::onLinkToFolderRequested);
+        connect(card, &TagCard::unlinkFromFolderRequested, this, &TagSidebar::onUnlinkFromFolderRequested);
         
         // Set selected state
         card->setSelected(m_selectedTags.contains(tag.id));
@@ -779,6 +815,20 @@ void TagSidebar::onRenameRequested(qint64 tagId)
     if (!TagManager::instance()->renameTag(tagId, newName)) {
         QMessageBox::warning(this, "Rename Tag", "Failed to rename tag.");
     }
+}
+
+void TagSidebar::onLinkToFolderRequested(qint64 tagId)
+{
+    QString dir = QFileDialog::getExistingDirectory(this, "Select Album Folder",
+        QDir::homePath());
+    if (!dir.isEmpty()) {
+        TagManager::instance()->setTagAlbumPath(tagId, dir);
+    }
+}
+
+void TagSidebar::onUnlinkFromFolderRequested(qint64 tagId)
+{
+    TagManager::instance()->clearTagAlbumPath(tagId);
 }
 
 void TagSidebar::clearAwaitingHotkey()

@@ -36,18 +36,22 @@ public:
     qint64 tagId() const { return m_tagId; }
     QString tagName() const { return m_name; }
     QString hotkey() const { return m_hotkey; }
+    bool isAlbumTag() const { return m_isAlbumTag; }
     
     void setSelected(bool selected);
     bool isSelected() const { return m_selected; }
     
     void setHotkey(const QString& hotkey);
     void setAwaitingHotkey(bool awaiting);
+    void setAlbumTag(bool isAlbum);
 
 Q_SIGNALS:
     void clicked(qint64 tagId);
     void hotkeyClicked(qint64 tagId);
     void deleteRequested(qint64 tagId);
     void renameRequested(qint64 tagId);
+    void linkToFolderRequested(qint64 tagId);
+    void unlinkFromFolderRequested(qint64 tagId);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -64,6 +68,7 @@ private:
     bool m_selected = false;
     bool m_hovered = false;
     bool m_awaitingHotkey = false;
+    bool m_isAlbumTag = false;
     
     QRect m_hotkeyRect;
     QRect m_deleteRect;
@@ -110,6 +115,8 @@ private Q_SLOTS:
     void onHotkeyClicked(qint64 tagId);
     void onDeleteRequested(qint64 tagId);
     void onRenameRequested(qint64 tagId);
+    void onLinkToFolderRequested(qint64 tagId);
+    void onUnlinkFromFolderRequested(qint64 tagId);
 
 private:
     enum SortMode { SortByCount, SortAlphabetic };

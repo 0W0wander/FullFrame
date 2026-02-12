@@ -34,6 +34,7 @@
 #include <QKeyEvent>
 #include <QFile>
 #include <QCheckBox>
+#include <QInputDialog>
 
 namespace FullFrame {
 
@@ -227,6 +228,10 @@ void MainWindow::setupUI()
                     setGalleryMode();
                 }
             });
+    
+    // Album tag auto-move: when an image is tagged with an album tag, move it
+    connect(TagManager::instance(), &TagManager::imageTagged,
+            this, &MainWindow::onImageTaggedForAlbum);
     
     // Install event filter to catch all key events for hotkeys
     qApp->installEventFilter(this);
@@ -670,7 +675,8 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
         QMenu* tagMenu = menu.addMenu("Add Tag");
         QList<Tag> tags = TagManager::instance()->allTags();
         for (const Tag& tag : tags) {
-            QAction* tagAction = tagMenu->addAction(tag.name);
+            QString prefix = tag.isAlbumTag() ? QString::fromUtf8("\xF0\x9F\x93\x81 ") : QString();
+            QAction* tagAction = tagMenu->addAction(prefix + tag.name);
             connect(tagAction, &QAction::triggered, this, [filePath, tag]() {
                 TagManager::instance()->tagImage(filePath, tag.id);
             });
@@ -685,6 +691,39 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
             });
         }
         removeTagMenu->setEnabled(!imageTags.isEmpty());
+
+        // Album actions
+        menu.addSeparator();
+
+        // "Move to Album" submenu — list existing album tags
+        QList<Tag> allTags = TagManager::instance()->allTags();
+        QMenu* moveToAlbumMenu = menu.addMenu(QString::fromUtf8("\xF0\x9F\x93\x81 Move to Album"));
+        bool hasAlbumTags = false;
+        QStringList selectedPaths = m_gridView->selectedImagePaths();
+        if (selectedPaths.isEmpty()) {
+            selectedPaths << filePath;
+        }
+        for (const Tag& tag : allTags) {
+            if (tag.isAlbumTag()) {
+                hasAlbumTags = true;
+                QAction* albumAction = moveToAlbumMenu->addAction(
+                    QString::fromUtf8("\xF0\x9F\x93\x81 ") + tag.name);
+                connect(albumAction, &QAction::triggered, this, [this, selectedPaths, tag]() {
+                    for (const QString& path : selectedPaths) {
+                        TagManager::instance()->tagImage(path, tag.id);
+                    }
+                });
+            }
+        }
+        moveToAlbumMenu->setEnabled(hasAlbumTags);
+
+        // "Create Album from Selection"
+        if (selectedPaths.size() >= 2) {
+            QAction* createAlbumAction = menu.addAction(
+                QString::fromUtf8("\xF0\x9F\x93\x81 Create Album from Selection..."));
+            connect(createAlbumAction, &QAction::triggered,
+                    this, &MainWindow::createAlbumFromSelection);
+        }
     }
 
     menu.exec(pos);
@@ -1061,6 +1100,172 @@ void MainWindow::toggleSidebar()
     bool visible = m_tagSidebar->isVisible();
     m_tagSidebar->setVisible(!visible);
     m_toggleSidebarAction->setChecked(!visible);
+}
+
+// ============== Album Support ==============
+
+void MainWindow::createAlbumFromSelection()
+{
+    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    if (selectedPaths.size() < 2) {
+        QMessageBox::information(this, "Create Album",
+            "Please select at least 2 images to create an album.");
+        return;
+    }
+    
+    if (m_currentFolder.isEmpty()) {
+        QMessageBox::warning(this, "Create Album",
+            "No folder is currently open.");
+        return;
+    }
+    
+    // Ask for album name
+    bool ok = false;
+    QString albumName = QInputDialog::getText(this, "Create Album",
+        QString("Album name (will create a subfolder in current directory):"),
+        QLineEdit::Normal, "", &ok);
+    
+    albumName = albumName.trimmed();
+    if (!ok || albumName.isEmpty()) {
+        return;
+    }
+    
+    // Create the album folder
+    QDir currentDir(m_currentFolder);
+    QString albumPath = currentDir.filePath(albumName);
+    
+    if (QDir(albumPath).exists()) {
+        QMessageBox::warning(this, "Create Album",
+            QString("A folder named \"%1\" already exists.").arg(albumName));
+        return;
+    }
+    
+    if (!currentDir.mkdir(albumName)) {
+        QMessageBox::warning(this, "Create Album",
+            "Failed to create album folder. Check permissions.");
+        return;
+    }
+    
+    // Move selected files into the album folder
+    int successCount = 0;
+    int failCount = 0;
+    QStringList movedNewPaths;
+    QStringList movedOldPaths;
+    
+    for (const QString& srcPath : selectedPaths) {
+        QFileInfo srcInfo(srcPath);
+        QString destPath = QDir(albumPath).filePath(srcInfo.fileName());
+        
+        // Handle filename conflicts
+        if (QFile::exists(destPath)) {
+            QString baseName = srcInfo.completeBaseName();
+            QString suffix = srcInfo.suffix();
+            int counter = 1;
+            do {
+                destPath = QDir(albumPath).filePath(
+                    QString("%1_%2.%3").arg(baseName).arg(counter).arg(suffix));
+                counter++;
+            } while (QFile::exists(destPath));
+        }
+        
+        if (QFile::rename(srcPath, destPath)) {
+            successCount++;
+            movedOldPaths << srcPath;
+            movedNewPaths << destPath;
+            
+            // Update the image path in the tag database
+            TagManager::instance()->updateImagePath(srcPath, destPath);
+        } else {
+            failCount++;
+        }
+    }
+    
+    // Create an album tag linked to this folder
+    if (successCount > 0) {
+        QString tagColor = "#5c6bc0";  // Indigo for album tags
+        qint64 tagId = TagManager::instance()->createTag(albumName, tagColor);
+        if (tagId >= 0) {
+            TagManager::instance()->setTagAlbumPath(tagId, albumPath);
+            
+            // Tag all moved images with the album tag
+            TagManager::instance()->tagImages(movedNewPaths, tagId);
+        }
+    }
+    
+    // Refresh the view
+    if (!m_currentFolder.isEmpty()) {
+        openFolder(m_currentFolder);
+    }
+    
+    // Show result
+    if (failCount > 0) {
+        QMessageBox::warning(this, "Create Album",
+            QString("Created album \"%1\". Moved %2 file(s), %3 failed.")
+                .arg(albumName).arg(successCount).arg(failCount));
+    } else {
+        m_statusLabel->setText(
+            QString("Created album \"%1\" with %2 images")
+                .arg(albumName).arg(successCount));
+    }
+}
+
+void MainWindow::onImageTaggedForAlbum(const QString& imagePath, qint64 tagId)
+{
+    Tag tag = TagManager::instance()->tag(tagId);
+    if (!tag.isAlbumTag()) {
+        return;
+    }
+    
+    QFileInfo fileInfo(imagePath);
+    QDir albumDir(tag.albumPath);
+    
+    // Ensure album directory exists
+    if (!albumDir.exists()) {
+        QDir().mkpath(tag.albumPath);
+    }
+    
+    // Check if file is already in the album folder
+    if (fileInfo.absolutePath() == albumDir.absolutePath()) {
+        return;
+    }
+    
+    // Check if the source file still exists (might have been moved already)
+    if (!fileInfo.exists()) {
+        return;
+    }
+    
+    // Determine destination path
+    QString destPath = albumDir.filePath(fileInfo.fileName());
+    
+    // Handle filename conflicts
+    if (QFile::exists(destPath)) {
+        QString baseName = fileInfo.completeBaseName();
+        QString suffix = fileInfo.suffix();
+        int counter = 1;
+        do {
+            destPath = albumDir.filePath(
+                QString("%1_%2.%3").arg(baseName).arg(counter).arg(suffix));
+            counter++;
+        } while (QFile::exists(destPath));
+    }
+    
+    // Move the file
+    if (QFile::rename(imagePath, destPath)) {
+        TagManager::instance()->updateImagePath(imagePath, destPath);
+        
+        // Schedule a batched view refresh (avoids refreshing per-file in bulk operations)
+        if (!m_albumRefreshTimer) {
+            m_albumRefreshTimer = new QTimer(this);
+            m_albumRefreshTimer->setSingleShot(true);
+            m_albumRefreshTimer->setInterval(300);
+            connect(m_albumRefreshTimer, &QTimer::timeout, this, [this]() {
+                if (!m_currentFolder.isEmpty()) {
+                    openFolder(m_currentFolder);
+                }
+            });
+        }
+        m_albumRefreshTimer->start();
+    }
 }
 
 } // namespace FullFrame

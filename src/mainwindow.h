@@ -56,6 +56,8 @@ private Q_SLOTS:
     void setGalleryMode();
     void setTaggingMode();
     void toggleSidebar();
+    void createAlbumFromSelection();
+    void onImageTaggedForAlbum(const QString& imagePath, qint64 tagId);
 
 private:
     void setupUI();
@@ -105,6 +107,9 @@ private:
     QString m_currentFolder;
     int m_pendingThumbnails = 0;
     int m_totalThumbnails = 0;
+    
+    // Album auto-move batching
+    QTimer* m_albumRefreshTimer = nullptr;
 };
 
 } // namespace FullFrame

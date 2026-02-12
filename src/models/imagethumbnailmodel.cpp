@@ -315,6 +315,8 @@ void ImageThumbnailModel::scanDirectory(const QString& path, bool recursive)
         item.fileName = rootDir.relativeFilePath(info.filePath());
         item.fileSize = info.size();
         item.modifiedDate = info.lastModified();
+        // Use birthTime (creation date) if available, otherwise fall back to modified date
+        item.creationDate = info.birthTime().isValid() ? info.birthTime() : info.lastModified();
         item.mediaType = ThumbnailCreator::getMediaType(info.filePath());
         
         // Load tags if TagManager is initialized
@@ -358,6 +360,8 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
         item.fileName = info.fileName();
         item.fileSize = info.size();
         item.modifiedDate = info.lastModified();
+        // Use birthTime (creation date) if available, otherwise fall back to modified date
+        item.creationDate = info.birthTime().isValid() ? info.birthTime() : info.lastModified();
         item.mediaType = ThumbnailCreator::getMediaType(path);
         
         if (TagManager::instance()->isInitialized()) {
@@ -736,6 +740,64 @@ void ImageThumbnailModel::sortByRanking(const QSet<QString>& favorites, const QH
         }
         
         // Same rating (or both unrated), sort by filename
+        return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
+    });
+    
+    // Rebuild path lookup
+    m_pathToRow.clear();
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
+    }
+    
+    endResetModel();
+}
+
+void ImageThumbnailModel::sortByCreationDate()
+{
+    beginResetModel();
+    
+    // Sort by creation date (newest first), then by filename
+    std::sort(m_items.begin(), m_items.end(), [](const ImageItem& a, const ImageItem& b) {
+        if (a.creationDate != b.creationDate) {
+            return a.creationDate > b.creationDate;  // Newest first
+        }
+        // Same date, sort by filename
+        return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
+    });
+    
+    // Rebuild path lookup
+    m_pathToRow.clear();
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
+    }
+    
+    endResetModel();
+}
+
+void ImageThumbnailModel::sortByTag()
+{
+    beginResetModel();
+    
+    // Sort: items with tags first, then by number of tags (more tags first), then by filename
+    std::sort(m_items.begin(), m_items.end(), [](const ImageItem& a, const ImageItem& b) {
+        bool aHasTags = !a.tagIds.isEmpty();
+        bool bHasTags = !b.tagIds.isEmpty();
+        
+        // Items with tags first
+        if (aHasTags != bHasTags) {
+            return aHasTags;  // a comes first if it has tags and b doesn't
+        }
+        
+        // Both have tags or both don't - sort by number of tags
+        if (aHasTags && bHasTags) {
+            int aTagCount = a.tagIds.size();
+            int bTagCount = b.tagIds.size();
+            if (aTagCount != bTagCount) {
+                return aTagCount > bTagCount;  // More tags first
+            }
+        }
+        
+        // Same tag count (or both untagged), sort by filename
         return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
     });
     

@@ -237,6 +237,20 @@ void MainWindow::setupUI()
     connect(TagManager::instance(), &TagManager::tagAlbumPathChanged,
             this, &MainWindow::onTagLinkedToFolder);
     
+    // Re-apply tag sorting when tags change
+    connect(TagManager::instance(), &TagManager::imageTagged,
+            this, [this](const QString&, qint64) {
+                if (m_sortMode == "tag") {
+                    reapplySort();
+                }
+            });
+    connect(TagManager::instance(), &TagManager::imageUntagged,
+            this, [this](const QString&, qint64) {
+                if (m_sortMode == "tag") {
+                    reapplySort();
+                }
+            });
+    
     // Install event filter to catch all key events for hotkeys
     qApp->installEventFilter(this);
 }
@@ -479,7 +493,9 @@ void MainWindow::setupToolBar()
     m_sortCombo = new QComboBox(this);
     m_sortCombo->addItem("Sort: Default", "default");
     m_sortCombo->addItem("Sort: By Ranking", "ranking");
-    m_sortCombo->setMinimumWidth(140);
+    m_sortCombo->addItem("Sort: By Creation Date", "creationDate");
+    m_sortCombo->addItem("Sort: By Tag", "tag");
+    m_sortCombo->setMinimumWidth(160);
     m_sortCombo->setStyleSheet(R"(
         QComboBox {
             background-color: #252525;
@@ -518,6 +534,10 @@ void MainWindow::setupToolBar()
         if (m_model) {
             if (m_sortMode == "ranking") {
                 m_model->sortByRanking(m_favorites, m_ratings);
+            } else if (m_sortMode == "creationDate") {
+                m_model->sortByCreationDate();
+            } else if (m_sortMode == "tag") {
+                m_model->sortByTag();
             } else {
                 m_model->sortDefault();
             }
@@ -671,8 +691,15 @@ void MainWindow::onLoadingFinished(int count)
     QApplication::restoreOverrideCursor();
     
     // Apply current sort mode
-    if (m_model && m_sortMode == "ranking") {
-        m_model->sortByRanking(m_favorites, m_ratings);
+    if (m_model) {
+        if (m_sortMode == "ranking") {
+            m_model->sortByRanking(m_favorites, m_ratings);
+        } else if (m_sortMode == "creationDate") {
+            m_model->sortByCreationDate();
+        } else if (m_sortMode == "tag") {
+            m_model->sortByTag();
+        }
+        // Default sort is already applied by the model
     }
     
     // Set up progress tracking for thumbnails
@@ -1628,6 +1655,22 @@ void MainWindow::onTagLinkedToFolder(qint64 tagId, const QString& albumPath)
         }
         m_albumRefreshTimer->start();
     }
+}
+
+void MainWindow::reapplySort()
+{
+    if (!m_model) {
+        return;
+    }
+    
+    if (m_sortMode == "ranking") {
+        m_model->sortByRanking(m_favorites, m_ratings);
+    } else if (m_sortMode == "creationDate") {
+        m_model->sortByCreationDate();
+    } else if (m_sortMode == "tag") {
+        m_model->sortByTag();
+    }
+    // Default sort is already applied by the model
 }
 
 } // namespace FullFrame

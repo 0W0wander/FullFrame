@@ -72,6 +72,7 @@ private:
     void initializeDatabase();
     void loadSettings();
     void saveSettings();
+    void reapplySort();
 
 protected:
     void closeEvent(QCloseEvent* event) override;

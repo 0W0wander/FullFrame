@@ -30,6 +30,7 @@ struct ImageItem
     QString fileName;
     qint64 fileSize = 0;
     QDateTime modifiedDate;
+    QDateTime creationDate;
     QSet<qint64> tagIds;
     bool selected = false;
     MediaType mediaType = MediaType::Unknown;
@@ -137,6 +138,8 @@ public:
     
     // Sorting
     void sortByRanking(const QSet<QString>& favorites, const QHash<QString, int>& ratings);
+    void sortByCreationDate();
+    void sortByTag();
     void sortDefault();
 
 Q_SIGNALS:

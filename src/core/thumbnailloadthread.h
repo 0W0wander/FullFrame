@@ -120,6 +120,11 @@ Q_SIGNALS:
     // Emitted when thumbnail is ready (pixmap version - main thread only)
     void thumbnailReady(const QString& filePath, const QPixmap& pixmap);
     
+    // Lightweight notification that a thumbnail is now available in the image cache.
+    // Unlike thumbnailReady, this does NOT create a QPixmap on the main thread,
+    // so it avoids the expensive QPixmap::fromImage() burst during initial loading.
+    void thumbnailAvailable(const QString& filePath);
+    
     // Emitted on load failure
     void thumbnailFailed(const QString& filePath);
 

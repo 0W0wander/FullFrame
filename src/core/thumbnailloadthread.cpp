@@ -90,20 +90,10 @@ void ThumbnailLoadThread::load(const ThumbnailTask& task)
     // Check cache first
     if (ThumbnailCache::instance()->hasImage(task.cacheKey) ||
         ThumbnailCache::instance()->hasPixmap(task.cacheKey)) {
-        // Already cached, emit signal directly
-        const QImage* cached = ThumbnailCache::instance()->retrieveImage(task.cacheKey);
-        if (cached && !cached->isNull()) {
-            Q_EMIT thumbnailLoaded(task.filePath, *cached);
-            
-            // Also emit pixmap if we're on main thread
-            if (QThread::currentThread() == qApp->thread()) {
-                QPixmap pixmap = QPixmap::fromImage(*cached);
-                // Cache the pixmap in case it was evicted (image cache is larger than pixmap cache)
-                ThumbnailCache::instance()->putPixmap(task.cacheKey, pixmap);
-                Q_EMIT thumbnailReady(task.filePath, pixmap);
-            }
-            return;
-        }
+        // Already cached — notify without creating a QPixmap.
+        // The model's data() will convert from image cache lazily during paint.
+        Q_EMIT thumbnailAvailable(task.filePath);
+        return;
     }
 
     scheduleTask(task);
@@ -238,11 +228,17 @@ void ThumbnailLoadThread::slotWorkerFinished(const ThumbnailResult& result)
     if (result.success) {
         Q_EMIT thumbnailLoaded(result.filePath, result.image);
         
-        // Create and cache pixmap (we're on main thread now)
-        QPixmap pixmap = QPixmap::fromImage(result.image);
-        ThumbnailCache::instance()->putPixmap(result.cacheKey, pixmap);
-        
-        Q_EMIT thumbnailReady(result.filePath, pixmap);
+        // Emit lightweight notification — the QImage is already in the image
+        // cache (put there by the worker).  We intentionally do NOT call
+        // QPixmap::fromImage() here.  During initial directory loading, dozens
+        // of worker completions arrive in a burst; doing the (expensive)
+        // image→pixmap conversion for every one of them monopolises the main
+        // thread, starving wheel-event processing and causing scroll lag at
+        // the top of the gallery.
+        //
+        // Instead, the model's data() converts lazily during paint — only for
+        // the ~20-30 items actually visible on screen.
+        Q_EMIT thumbnailAvailable(result.filePath);
     } else {
         Q_EMIT thumbnailFailed(result.filePath);
     }

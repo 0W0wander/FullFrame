@@ -17,6 +17,7 @@
 #include <QPainter>
 #include <QLocale>
 #include <QDebug>
+#include <algorithm>
 
 namespace FullFrame {
 
@@ -25,6 +26,14 @@ ImageThumbnailModel::ImageThumbnailModel(QObject* parent)
 {
     connectThumbnailThread();
     connectTagManager();
+    
+    // Batch thumbnail dataChanged signals — instead of firing per-thumbnail
+    // (which floods the UI event loop during active loading), accumulate
+    // dirty rows and flush every 150ms in a single batch.
+    m_thumbBatchTimer = new QTimer(this);
+    m_thumbBatchTimer->setSingleShot(true);
+    m_thumbBatchTimer->setInterval(150);
+    connect(m_thumbBatchTimer, &QTimer::timeout, this, &ImageThumbnailModel::flushThumbnailUpdates);
     
     // Create placeholder pixmaps
     m_loadingPixmap = QPixmap(m_thumbnailSize, m_thumbnailSize);
@@ -38,8 +47,15 @@ ImageThumbnailModel::~ImageThumbnailModel() = default;
 
 void ImageThumbnailModel::connectThumbnailThread()
 {
-    connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailReady,
-            this, &ImageThumbnailModel::onThumbnailReady);
+    // Connect to the lightweight thumbnailAvailable signal instead of
+    // thumbnailReady.  thumbnailReady creates a QPixmap on the main thread
+    // for every completed thumbnail — during initial loading this burst of
+    // QPixmap::fromImage() calls starves the event loop.
+    // thumbnailAvailable just tells us "the QImage is in the image cache";
+    // we defer the QImage→QPixmap conversion to data()'s paint-time path
+    // where only visible items are converted.
+    connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailAvailable,
+            this, &ImageThumbnailModel::onThumbnailAvailable);
     connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailFailed,
             this, &ImageThumbnailModel::onThumbnailFailed);
 }
@@ -137,7 +153,12 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
                 return QVariant();
             }
             
-            // Pre-allocate with expected size
+            // Return cached tag list if still valid (avoids per-paint heap allocations)
+            if (!item.tagListDirty) {
+                return item.cachedTagList;
+            }
+            
+            // Rebuild and cache
             QVariantList tagList;
             tagList.reserve(item.tagIds.size());
             
@@ -150,6 +171,8 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
                     tagList.append(tagInfo);
                 }
             }
+            item.cachedTagList = tagList;
+            item.tagListDirty = false;
             return tagList;
         }
         
@@ -509,30 +532,53 @@ bool ImageThumbnailModel::matchesTagFilter(const ImageItem& item) const
 
 // ============== Thumbnail Slots ==============
 
-void ImageThumbnailModel::onThumbnailReady(const QString& filePath, const QPixmap& pixmap)
+void ImageThumbnailModel::onThumbnailAvailable(const QString& filePath)
 {
     m_pendingThumbnails.remove(filePath);
     
     int row = indexOf(filePath);
     if (row >= 0 && row < m_items.size()) {
-        // Store the pixmap directly in the item to avoid cache lookups
-        m_items[row].cachedPixmap = pixmap;
-        m_items[row].thumbnailLoaded = true;
-        
-        QModelIndex idx = index(row);
-        Q_EMIT dataChanged(idx, idx, {Qt::DecorationRole, ThumbnailRole});
-        Q_EMIT thumbnailUpdated(idx);
+        // DON'T store a pixmap here — the QImage is already in the image cache
+        // (put there by the worker thread).  When the view repaints, data()
+        // will find it in the image cache and do a lazy QPixmap::fromImage()
+        // only for the ~20-30 items actually visible on screen.
+        //
+        // Eagerly converting every completed thumbnail to a QPixmap would
+        // monopolise the main thread during the initial loading burst,
+        // starving wheel-event processing and causing scroll lag at the top.
+        m_thumbDirtyRows.append(row);
+        if (!m_thumbBatchTimer->isActive()) {
+            m_thumbBatchTimer->start();
+        }
     }
 }
 
 void ImageThumbnailModel::onThumbnailFailed(const QString& filePath)
 {
     m_pendingThumbnails.remove(filePath);
+    // Don't emit dataChanged for failures — the placeholder doesn't change,
+    // so repainting would just redraw the same loading placeholder.
+}
+
+void ImageThumbnailModel::flushThumbnailUpdates()
+{
+    if (m_thumbDirtyRows.isEmpty()) return;
     
-    int row = indexOf(filePath);
-    if (row >= 0) {
-        QModelIndex idx = index(row);
-        Q_EMIT dataChanged(idx, idx, {Qt::DecorationRole, ThumbnailRole});
+    // Emit ONE ranged dataChanged covering all dirty rows.
+    // Previously we emitted one signal per dirty row; each signal makes Qt
+    // call visualRect() twice (topLeft, bottomRight) to compute the dirty
+    // region.  With 50+ thumbnails completing in a single batch that meant
+    // 100+ visualRect() calls, measurable overhead during scroll.
+    // A single range signal reduces that to exactly 2 visualRect() calls.
+    int minRow = *std::min_element(m_thumbDirtyRows.begin(), m_thumbDirtyRows.end());
+    int maxRow = *std::max_element(m_thumbDirtyRows.begin(), m_thumbDirtyRows.end());
+    m_thumbDirtyRows.clear();
+    
+    minRow = qMax(0, minRow);
+    maxRow = qMin(maxRow, m_items.size() - 1);
+    
+    if (minRow <= maxRow) {
+        Q_EMIT dataChanged(index(minRow), index(maxRow), {Qt::DecorationRole, ThumbnailRole});
     }
 }
 
@@ -558,10 +604,9 @@ void ImageThumbnailModel::onImageTagged(const QString& imagePath, qint64 tagId)
 {
     int row = indexOf(imagePath);
     if (row >= 0 && row < m_items.size()) {
-        // Update the cached tag IDs
         m_items[row].tagIds.insert(tagId);
+        m_items[row].tagListDirty = true;  // Invalidate cached tag display data
         
-        // Emit dataChanged to update the view
         QModelIndex idx = index(row);
         Q_EMIT dataChanged(idx, idx, {TagIdsRole, HasTagsRole, TagListRole});
     }
@@ -571,10 +616,9 @@ void ImageThumbnailModel::onImageUntagged(const QString& imagePath, qint64 tagId
 {
     int row = indexOf(imagePath);
     if (row >= 0 && row < m_items.size()) {
-        // Update the cached tag IDs
         m_items[row].tagIds.remove(tagId);
+        m_items[row].tagListDirty = true;  // Invalidate cached tag display data
         
-        // Emit dataChanged to update the view
         QModelIndex idx = index(row);
         Q_EMIT dataChanged(idx, idx, {TagIdsRole, HasTagsRole, TagListRole});
     }
@@ -584,10 +628,10 @@ void ImageThumbnailModel::onTagRenamed(qint64 tagId, const QString& newName)
 {
     Q_UNUSED(newName)
     
-    // Notify the view that TagListRole changed for every item that has this tag,
-    // so the thumbnail badge text is repainted with the new name.
+    // Invalidate and repaint tag badges for every item that has this tag
     for (int row = 0; row < m_items.size(); ++row) {
         if (m_items[row].tagIds.contains(tagId)) {
+            m_items[row].tagListDirty = true;
             QModelIndex idx = index(row);
             Q_EMIT dataChanged(idx, idx, {TagListRole});
         }

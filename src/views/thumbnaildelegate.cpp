@@ -9,7 +9,6 @@
 
 #include <QPainter>
 #include <QApplication>
-#include <QPainterPath>
 
 namespace FullFrame {
 
@@ -20,7 +19,18 @@ ThumbnailDelegate::ThumbnailDelegate(QObject* parent)
     , m_tagIndicatorColor(76, 175, 80)   // Material green
     , m_backgroundColor(30, 30, 30)       // Dark background
     , m_textColor(200, 200, 200)         // Light gray text
+    , m_filenameFM(QFont())
+    , m_badgeFM(QFont())
 {
+    // Pre-create fonts and metrics once — avoids heap allocations during paint
+    m_filenameFont = QFont();
+    m_filenameFont.setPointSize(9);
+    m_filenameFM = QFontMetrics(m_filenameFont);
+
+    m_badgeFont = QFont();
+    m_badgeFont.setPointSize(8);
+    m_badgeFont.setBold(true);
+    m_badgeFM = QFontMetrics(m_badgeFont);
 }
 
 ThumbnailDelegate::~ThumbnailDelegate() = default;
@@ -59,13 +69,9 @@ void ThumbnailDelegate::setShowTagIndicator(bool show)
 void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                                const QModelIndex& index) const
 {
-    // Only set render hints once for batch painting - significantly reduces overhead
-    // Antialiasing is only needed for rounded corners, SmoothPixmapTransform for scaling
-    const bool needsAntialiasing = true;  // For rounded corners
-    
     painter->save();
     
-    // Background - no render hints needed
+    // Background
     QRect itemRect = option.rect;
     painter->fillRect(itemRect, m_backgroundColor);
 
@@ -79,30 +85,33 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (thumbVar.userType() == QMetaType::QPixmap) {
         QPixmap pixmap = thumbVar.value<QPixmap>();
         if (!pixmap.isNull()) {
-            // Only enable smooth transform for actual pixmap drawing
-            painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+            // No SmoothPixmapTransform — thumbnails are already created at
+            // the target size, so drawPixmap is a 1:1 blit (no scaling).
             paintThumbnail(painter, thumbRect, pixmap);
-            painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
         } else {
             painter->fillRect(thumbRect, QColor(50, 50, 50));
         }
     }
 
-    // Selection effects - needs antialiasing for smooth borders
+    // Selection effects
     bool selected = option.state & QStyle::State_Selected;
     if (selected) {
-        painter->setRenderHint(QPainter::Antialiasing, needsAntialiasing);
+        painter->setRenderHint(QPainter::Antialiasing, true);
         paintSelection(painter, thumbRect, option);
+        painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
-    // Tag badges - needs antialiasing for rounded rects
-    QVariantList tagList = index.data(TagListRole).toList();
-    if (!tagList.isEmpty()) {
-        painter->setRenderHint(QPainter::Antialiasing, needsAntialiasing);
-        paintTagBadges(painter, thumbRect, tagList);
+    // Tag badges — only query model if item has tags (fast HasTagsRole check first)
+    if (index.data(HasTagsRole).toBool()) {
+        QVariantList tagList = index.data(TagListRole).toList();
+        if (!tagList.isEmpty()) {
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            paintTagBadges(painter, thumbRect, tagList);
+            painter->setRenderHint(QPainter::Antialiasing, false);
+        }
     }
 
-    // Filename - no antialiasing needed for text
+    // Filename
     if (m_showFilename) {
         QRect filenameRect(
             itemRect.x() + m_spacing,
@@ -129,12 +138,10 @@ void ThumbnailDelegate::paintThumbnail(QPainter* painter, const QRect& rect,
     int y = rect.y() + (rect.height() - targetSize.height()) / 2;
     QRect targetRect(x, y, targetSize.width(), targetSize.height());
 
-    // Draw with rounded corners - use simple clipping for performance
-    QPainterPath path;
-    path.addRoundedRect(targetRect, 4, 4);
-    painter->setClipPath(path);
+    // Draw pixmap directly — no QPainterPath clip (major perf bottleneck removed).
+    // The tiny 4px rounded corners aren't worth the CPU cost of path clipping
+    // on every visible item during every scroll repaint.
     painter->drawPixmap(targetRect, pixmap);
-    painter->setClipping(false);
 }
 
 void ThumbnailDelegate::paintSelection(QPainter* painter, const QRect& rect,
@@ -162,15 +169,10 @@ void ThumbnailDelegate::paintFilename(QPainter* painter, const QRect& rect,
                                        const QString& filename) const
 {
     painter->setPen(m_textColor);
+    painter->setFont(m_filenameFont);
     
-    QFont font = painter->font();
-    font.setPointSize(9);
-    painter->setFont(font);
-    
-    // Elide text if too long
-    QFontMetrics fm(font);
-    QString elidedText = fm.elidedText(filename, Qt::ElideMiddle, rect.width());
-    
+    // Elide text using pre-cached font metrics
+    QString elidedText = m_filenameFM.elidedText(filename, Qt::ElideMiddle, rect.width());
     painter->drawText(rect, Qt::AlignHCenter | Qt::AlignTop, elidedText);
 }
 
@@ -190,11 +192,7 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         return;
     }
 
-    QFont badgeFont = painter->font();
-    badgeFont.setPointSize(8);
-    badgeFont.setBold(true);
-    painter->setFont(badgeFont);
-    QFontMetrics fm(badgeFont);
+    painter->setFont(m_badgeFont);
 
     int badgeHeight = 16;
     int badgePadding = 6;
@@ -213,7 +211,7 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         QString colorStr = tagInfo["color"].toString();
         
         // Calculate badge width
-        int textWidth = fm.horizontalAdvance(name);
+        int textWidth = m_badgeFM.horizontalAdvance(name);
         int badgeWidth = textWidth + badgePadding * 2;
         
         // Check if we have room for this badge

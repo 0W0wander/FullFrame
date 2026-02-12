@@ -40,7 +40,7 @@ ImageGridView::ImageGridView(QWidget* parent)
     m_preloadTimer->setSingleShot(true);
     m_preloadTimer->setInterval(50);  // 50ms debounce
     connect(m_preloadTimer, &QTimer::timeout, this, &ImageGridView::preloadVisibleThumbnails);
-    
+
     // Note: Selection model connection is done in setImageModel() after model is set
 }
 
@@ -48,16 +48,17 @@ ImageGridView::~ImageGridView() = default;
 
 void ImageGridView::setupView()
 {
-    // QListView settings for optimal grid performance with thousands of items
-    setViewMode(QListView::IconMode);
+    // Use ListMode + wrapping instead of IconMode.
+    // IconMode builds a BSP tree for spatial queries — its cost is position-dependent
+    // (slower near the top where the tree is denser), causing scroll lag.
+    // ListMode uses simple row-based math: O(1) per visible item, position-independent.
+    setViewMode(QListView::ListMode);
     setFlow(QListView::LeftToRight);
     setWrapping(true);
     setResizeMode(QListView::Adjust);
-    setLayoutMode(QListView::Batched);  // Key for performance!
-    setBatchSize(100);  // Increased batch size for smoother scrolling with large collections
+    setLayoutMode(QListView::SinglePass);
 
-    // Movement and selection
-    setMovement(QListView::Static);
+    // Selection
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setSelectionBehavior(QAbstractItemView::SelectItems);
 
@@ -79,25 +80,19 @@ void ImageGridView::setupView()
     viewport()->setAttribute(Qt::WA_Hover, false);
     setAttribute(Qt::WA_Hover, false);
     
-    // Note: Don't use WA_NoSystemBackground - it causes stale content when filtering
-    // The other optimizations (no hover, no mouse tracking) are sufficient
+    // Tell Qt we paint the entire area — skip redundant background fill before each paint
+    viewport()->setAttribute(Qt::WA_OpaquePaintEvent, true);
     
-    // Style
+    // Style — ONLY QListView and QScrollBar rules.
+    // Per-item rules (QListView::item, ::item:selected, ::item:hover) are intentionally
+    // omitted because our delegate paints its own background. Stylesheet per-item rules
+    // force Qt's QStyleSheetStyle to match CSS selectors for every visible item on every
+    // repaint, which is measurable overhead during scroll.
     setStyleSheet(R"(
         QListView {
             background-color: #1e1e1e;
             border: none;
             outline: none;
-        }
-        QListView::item {
-            background: transparent;
-            border: none;
-        }
-        QListView::item:selected {
-            background: transparent;
-        }
-        QListView::item:hover {
-            background: transparent;
         }
         QScrollBar:vertical {
             background: #2d2d2d;
@@ -279,9 +274,33 @@ void ImageGridView::scrollContentsBy(int dx, int dy)
 
 void ImageGridView::wheelEvent(QWheelEvent* event)
 {
-    // Ctrl+Wheel zoom disabled - use slider instead
-    // Just pass to base class for normal scrolling
-    QListView::wheelEvent(event);
+    // Bypass Qt's QAbstractSlider wheel handling (which has its own step
+    // quantisation and acceleration logic) and set the scrollbar value
+    // directly — the same code path as dragging the scrollbar thumb.
+    QScrollBar* bar = verticalScrollBar();
+    if (!bar) {
+        event->ignore();
+        return;
+    }
+
+    int delta = 0;
+    if (!event->pixelDelta().isNull()) {
+        // Trackpad / high-res scroll — pixel-precise
+        delta = event->pixelDelta().y();
+    } else if (event->angleDelta().y() != 0) {
+        // Standard mouse wheel: 120 units per notch
+        int stepsPerNotch = QApplication::wheelScrollLines();  // typically 3
+        int pxPerStep = bar->singleStep();                     // typically 20
+        delta = qRound(event->angleDelta().y() / 120.0 * stepsPerNotch * pxPerStep);
+    }
+
+    if (delta == 0) {
+        event->ignore();
+        return;
+    }
+
+    bar->setValue(bar->value() - delta);
+    event->accept();
 }
 
 void ImageGridView::mousePressEvent(QMouseEvent* event)

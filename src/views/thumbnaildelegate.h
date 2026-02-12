@@ -14,6 +14,8 @@
 #include <QStyledItemDelegate>
 #include <QCache>
 #include <QVariantList>
+#include <QFont>
+#include <QFontMetrics>
 
 namespace FullFrame {
 
@@ -73,6 +75,12 @@ private:
     QColor m_tagIndicatorColor;
     QColor m_backgroundColor;
     QColor m_textColor;
+    
+    // Pre-cached fonts and metrics to avoid per-paint allocation
+    QFont m_filenameFont;
+    QFont m_badgeFont;
+    QFontMetrics m_filenameFM;
+    QFontMetrics m_badgeFM;
 };
 
 } // namespace FullFrame

@@ -15,6 +15,7 @@
 #include <QPixmap>
 #include <QSet>
 #include <QDir>
+#include <QTimer>
 
 #include "thumbnailcreator.h"
 
@@ -36,6 +37,10 @@ struct ImageItem
     // Cached thumbnail to avoid repeated lookups
     mutable QPixmap cachedPixmap;
     mutable bool thumbnailLoaded = false;
+    
+    // Cached tag display data to avoid QVariantList/QVariantMap allocations per paint
+    mutable QVariantList cachedTagList;
+    mutable bool tagListDirty = true;
     
     bool isValid() const { return !filePath.isEmpty(); }
     bool isImage() const { return mediaType == MediaType::Image; }
@@ -120,8 +125,9 @@ public Q_SLOTS:
     void refreshThumbnail(const QString& filePath);
 
 private Q_SLOTS:
-    void onThumbnailReady(const QString& filePath, const QPixmap& pixmap);
+    void onThumbnailAvailable(const QString& filePath);
     void onThumbnailFailed(const QString& filePath);
+    void flushThumbnailUpdates();
     void onImageTagged(const QString& imagePath, qint64 tagId);
     void onImageUntagged(const QString& imagePath, qint64 tagId);
     void onTagRenamed(qint64 tagId, const QString& newName);
@@ -145,6 +151,10 @@ private:
     QSet<qint64> m_tagFilter;
     bool m_requireAllTags = false;
     bool m_showUntagged = false;
+    
+    // Thumbnail update batching — reduces UI thread pressure during active loading
+    QTimer* m_thumbBatchTimer = nullptr;
+    QVector<int> m_thumbDirtyRows;
     
     // Placeholder pixmaps
     QPixmap m_loadingPixmap;

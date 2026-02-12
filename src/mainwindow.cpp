@@ -537,16 +537,19 @@ void MainWindow::onThumbnailReady(const QString& filePath)
     
     if (m_pendingThumbnails > 0) {
         m_pendingThumbnails--;
-        int loaded = m_totalThumbnails - m_pendingThumbnails;
-        m_loadingProgressBar->setValue(loaded);
         
-        if (m_pendingThumbnails > 0) {
-            m_loadingLabel->setText(QString("Loading... %1 remaining").arg(m_pendingThumbnails));
-        } else {
-            // All done
+        // Throttle progress bar + label updates — only every 20th thumbnail or
+        // when done. Previously this ran on EVERY thumbnail completion (hundreds/sec),
+        // which flooded the event loop with widget setText/setValue updates that
+        // trigger geometry recalcs and repaints, competing with scroll events.
+        if (m_pendingThumbnails == 0) {
             m_loadingProgressBar->hide();
             m_loadingLabel->hide();
             m_statusLabel->setText(QString("Ready - %1 images").arg(m_totalThumbnails));
+        } else if (m_pendingThumbnails % 20 == 0) {
+            int loaded = m_totalThumbnails - m_pendingThumbnails;
+            m_loadingProgressBar->setValue(loaded);
+            m_loadingLabel->setText(QString("Loading... %1 remaining").arg(m_pendingThumbnails));
         }
     }
 }
@@ -555,17 +558,15 @@ void MainWindow::onThumbnailFailed(const QString& filePath)
 {
     Q_UNUSED(filePath)
     
-    // Treat failed thumbnails same as loaded for progress
     if (m_pendingThumbnails > 0) {
         m_pendingThumbnails--;
-        int loaded = m_totalThumbnails - m_pendingThumbnails;
-        m_loadingProgressBar->setValue(loaded);
         
         if (m_pendingThumbnails <= 0) {
             m_loadingProgressBar->hide();
             m_loadingLabel->hide();
             m_statusLabel->setText(QString("Ready - %1 images").arg(m_totalThumbnails));
         }
+        // Don't update progress bar on every failure — throttled same as ready
     }
 }
 

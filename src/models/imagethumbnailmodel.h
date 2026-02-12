@@ -84,7 +84,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     // Load images from directory
-    void loadDirectory(const QString& path, bool recursive = false);
+    void loadDirectory(const QString& path, bool recursive = true);
     void loadFiles(const QStringList& filePaths);
     void clear();
     

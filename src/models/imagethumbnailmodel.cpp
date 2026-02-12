@@ -277,6 +277,7 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
 
 void ImageThumbnailModel::scanDirectory(const QString& path, bool recursive)
 {
+    QDir rootDir(path);
     QDir::Filters filters = QDir::Files | QDir::Readable;
     QDirIterator::IteratorFlags flags = recursive ? 
         QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags;
@@ -293,7 +294,9 @@ void ImageThumbnailModel::scanDirectory(const QString& path, bool recursive)
         
         ImageItem item;
         item.filePath = info.filePath();
-        item.fileName = info.fileName();
+        // Show relative path (e.g. "album/photo.jpg") so subfolder files
+        // are distinguishable from files in the root folder.
+        item.fileName = rootDir.relativeFilePath(info.filePath());
         item.fileSize = info.size();
         item.modifiedDate = info.lastModified();
         item.mediaType = ThumbnailCreator::getMediaType(info.filePath());

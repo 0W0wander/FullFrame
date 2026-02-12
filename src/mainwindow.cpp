@@ -807,14 +807,14 @@ void MainWindow::deleteSelectedImages()
     if (!skipConfirmation) {
         // Confirmation dialog with "don't show again" checkbox
         QMessageBox msgBox(this);
-        msgBox.setWindowTitle("Delete Images");
+        msgBox.setWindowTitle("Move to Recycle Bin");
         msgBox.setIcon(QMessageBox::Warning);
         
         QString message = selectedPaths.size() == 1 
-            ? QString("Delete \"%1\"?").arg(QFileInfo(selectedPaths.first()).fileName())
-            : QString("Delete %1 selected images?").arg(selectedPaths.size());
+            ? QString("Move \"%1\" to the Recycle Bin?").arg(QFileInfo(selectedPaths.first()).fileName())
+            : QString("Move %1 selected images to the Recycle Bin?").arg(selectedPaths.size());
         msgBox.setText(message);
-        msgBox.setInformativeText("This action cannot be undone.");
+        msgBox.setInformativeText("You can restore them from the Recycle Bin if needed.");
         
         QCheckBox* dontAskAgain = new QCheckBox("Don't ask me again");
         msgBox.setCheckBox(dontAskAgain);
@@ -839,7 +839,7 @@ void MainWindow::deleteSelectedImages()
     
     for (const QString& path : selectedPaths) {
         QFile file(path);
-        if (file.remove()) {
+        if (file.moveToTrash()) {
             successCount++;
         } else {
             failCount++;
@@ -867,11 +867,11 @@ void MainWindow::deleteSelectedImages()
     
     // Show result
     if (failCount > 0) {
-        QMessageBox::warning(this, "Delete Results",
-            QString("Deleted %1 file(s). Failed to delete %2 file(s).")
+        QMessageBox::warning(this, "Recycle Bin",
+            QString("Moved %1 file(s) to Recycle Bin. Failed for %2 file(s).")
                 .arg(successCount).arg(failCount));
     } else {
-        m_statusLabel->setText(QString("Deleted %1 file(s)").arg(successCount));
+        m_statusLabel->setText(QString("Moved %1 file(s) to Recycle Bin").arg(successCount));
     }
 }
 

@@ -93,6 +93,9 @@ public:
     
     // Handle hotkey press - returns true if handled
     bool handleHotkey(const QString& key);
+    
+    // Check if sidebar is awaiting a hotkey assignment
+    qint64 awaitingHotkeyTagId() const { return m_awaitingHotkeyTagId; }
 
 Q_SIGNALS:
     void tagFilterChanged(const QSet<qint64>& tagIds);

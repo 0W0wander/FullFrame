@@ -182,6 +182,9 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
         case IsFavoritedRole:
             return isFavorited(item.filePath);
             
+        case RatingRole:
+            return m_ratings.value(item.filePath, 0);
+            
         case Qt::ToolTipRole:
             return QString("%1\n%2\n%3")
                 .arg(item.fileName)
@@ -620,6 +623,39 @@ void ImageThumbnailModel::setFavorites(const QSet<QString>& favorites)
     }
 }
 
+// ============== Rating System ==============
+
+void ImageThumbnailModel::setRatings(const QHash<QString, int>& ratings)
+{
+    m_ratings = ratings;
+    // Notify view to repaint rating indicators
+    if (rowCount() > 0) {
+        QModelIndex topLeft = index(0, 0);
+        QModelIndex bottomRight = index(rowCount() - 1, 0);
+        Q_EMIT dataChanged(topLeft, bottomRight, {RatingRole});
+    }
+}
+
+void ImageThumbnailModel::setRating(const QString& filePath, int rating)
+{
+    if (rating <= 0) {
+        m_ratings.remove(filePath);
+    } else {
+        m_ratings.insert(filePath, qBound(1, rating, 5));
+    }
+    
+    int row = indexOf(filePath);
+    if (row >= 0) {
+        QModelIndex idx = index(row);
+        Q_EMIT dataChanged(idx, idx, {RatingRole});
+    }
+}
+
+int ImageThumbnailModel::rating(const QString& filePath) const
+{
+    return m_ratings.value(filePath, 0);
+}
+
 // ============== Filename Filtering ==============
 
 void ImageThumbnailModel::setFilenameFilter(const QString& filter)
@@ -667,6 +703,67 @@ void ImageThumbnailModel::applyFilenameFilter()
     
     endResetModel();
     Q_EMIT loadingFinished(m_items.size());
+}
+
+// ============== Sorting ==============
+
+void ImageThumbnailModel::sortByRanking(const QSet<QString>& favorites, const QHash<QString, int>& ratings)
+{
+    beginResetModel();
+    
+    // Sort: favorites first, then by rating (5 down to 1), then unrated
+    // Within each group, maintain filename order
+    std::sort(m_items.begin(), m_items.end(), [&favorites, &ratings](const ImageItem& a, const ImageItem& b) {
+        bool aFav = favorites.contains(a.filePath);
+        bool bFav = favorites.contains(b.filePath);
+        
+        // Favorites first
+        if (aFav != bFav) {
+            return aFav;  // a comes first if it's favorited and b is not
+        }
+        
+        // If both are favorites or both are not, sort by rating
+        int aRating = ratings.value(a.filePath, 0);
+        int bRating = ratings.value(b.filePath, 0);
+        
+        // Higher ratings first (5, 4, 3, 2, 1, then 0/unrated)
+        if (aRating != bRating) {
+            // If one is unrated (0), it goes last
+            if (aRating == 0) return false;
+            if (bRating == 0) return true;
+            // Otherwise, higher rating first
+            return aRating > bRating;
+        }
+        
+        // Same rating (or both unrated), sort by filename
+        return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
+    });
+    
+    // Rebuild path lookup
+    m_pathToRow.clear();
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
+    }
+    
+    endResetModel();
+}
+
+void ImageThumbnailModel::sortDefault()
+{
+    beginResetModel();
+    
+    // Sort by filename (case-insensitive) - the default order
+    std::sort(m_items.begin(), m_items.end(), [](const ImageItem& a, const ImageItem& b) {
+        return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
+    });
+    
+    // Rebuild path lookup
+    m_pathToRow.clear();
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
+    }
+    
+    endResetModel();
 }
 
 bool ImageThumbnailModel::matchesTagFilter(const ImageItem& item) const

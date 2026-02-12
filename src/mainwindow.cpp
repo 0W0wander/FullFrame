@@ -329,6 +329,14 @@ void MainWindow::setupMenuBar()
         }
     });
     
+    m_ratingHotkeysAction = prefsMenu->addAction("&Rating Hotkeys (1-5)");
+    m_ratingHotkeysAction->setCheckable(true);
+    m_ratingHotkeysAction->setChecked(m_ratingHotkeysEnabled);
+    m_ratingHotkeysAction->setToolTip("When enabled, keys 1-5 set a rating on selected images instead of toggling tags");
+    connect(m_ratingHotkeysAction, &QAction::toggled, this, [this](bool checked) {
+        m_ratingHotkeysEnabled = checked;
+    });
+    
     prefsMenu->addSeparator();
     
     QAction* openDbFolderAction = prefsMenu->addAction("Open &Database Folder...");
@@ -466,6 +474,57 @@ void MainWindow::setupToolBar()
     searchLayout->addWidget(searchButton);
     
     layout->addWidget(searchWidget);
+
+    // Sort combo box
+    m_sortCombo = new QComboBox(this);
+    m_sortCombo->addItem("Sort: Default", "default");
+    m_sortCombo->addItem("Sort: By Ranking", "ranking");
+    m_sortCombo->setMinimumWidth(140);
+    m_sortCombo->setStyleSheet(R"(
+        QComboBox {
+            background-color: #252525;
+            border: 1px solid #3d3d3d;
+            border-radius: 4px;
+            padding: 4px 10px;
+            color: #e0e0e0;
+            font-size: 12px;
+        }
+        QComboBox:hover {
+            border: 1px solid #005a9e;
+        }
+        QComboBox:focus {
+            border: 1px solid #005a9e;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox::down-arrow {
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid #a0a0a0;
+            margin-right: 5px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #252525;
+            border: 1px solid #3d3d3d;
+            selection-background-color: #005a9e;
+            color: #e0e0e0;
+        }
+    )");
+    connect(m_sortCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_sortMode = m_sortCombo->itemData(index).toString();
+        if (m_model) {
+            if (m_sortMode == "ranking") {
+                m_model->sortByRanking(m_favorites, m_ratings);
+            } else {
+                m_model->sortDefault();
+            }
+        }
+        saveSettings();
+    });
+    layout->addWidget(m_sortCombo);
 
     // Zoom controls
     QLabel* zoomIcon = new QLabel("🔍", this);
@@ -610,6 +669,11 @@ void MainWindow::onLoadingFinished(int count)
 {
     m_statusLabel->setText(QString("Loaded %1 images").arg(count));
     QApplication::restoreOverrideCursor();
+    
+    // Apply current sort mode
+    if (m_model && m_sortMode == "ranking") {
+        m_model->sortByRanking(m_favorites, m_ratings);
+    }
     
     // Set up progress tracking for thumbnails
     m_totalThumbnails = count;
@@ -831,6 +895,34 @@ void MainWindow::loadSettings()
         m_model->setFavorites(m_favorites);
     }
     
+    // Load ratings
+    m_ratingHotkeysEnabled = settings.value("ratingHotkeysEnabled", true).toBool();
+    if (m_ratingHotkeysAction) {
+        m_ratingHotkeysAction->setChecked(m_ratingHotkeysEnabled);
+    }
+    QVariantMap ratingsMap = settings.value("ratings").toMap();
+    m_ratings.clear();
+    for (auto it = ratingsMap.constBegin(); it != ratingsMap.constEnd(); ++it) {
+        int val = it.value().toInt();
+        if (val >= 1 && val <= 5) {
+            m_ratings.insert(it.key(), val);
+        }
+    }
+    if (m_model) {
+        m_model->setRatings(m_ratings);
+    }
+    
+    // Load sort mode
+    m_sortMode = settings.value("sortMode", "default").toString();
+    if (m_sortCombo) {
+        int index = m_sortCombo->findData(m_sortMode);
+        if (index >= 0) {
+            m_sortCombo->blockSignals(true);
+            m_sortCombo->setCurrentIndex(index);
+            m_sortCombo->blockSignals(false);
+        }
+    }
+    
     QString lastFolder = settings.value("lastFolder").toString();
     if (!lastFolder.isEmpty() && QDir(lastFolder).exists()) {
         openFolder(lastFolder);
@@ -847,6 +939,17 @@ void MainWindow::saveSettings()
     settings.setValue("lastFolder", m_currentFolder);
     settings.setValue("showAlbumFiles", m_showAlbumFiles);
     settings.setValue("favorites", QStringList(m_favorites.begin(), m_favorites.end()));
+    
+    // Save ratings
+    settings.setValue("ratingHotkeysEnabled", m_ratingHotkeysEnabled);
+    QVariantMap ratingsMap;
+    for (auto it = m_ratings.constBegin(); it != m_ratings.constEnd(); ++it) {
+        ratingsMap.insert(it.key(), it.value());
+    }
+    settings.setValue("ratings", ratingsMap);
+    
+    // Save sort mode
+    settings.setValue("sortMode", m_sortMode);
 }
 
 // ============== Events ==============
@@ -918,6 +1021,19 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
             return true;
         }
         
+        // Handle rating hotkeys (1-5) before tag hotkeys
+        if (m_ratingHotkeysEnabled &&
+            keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_5 &&
+            !(keyEvent->modifiers() & Qt::ControlModifier) &&
+            !(keyEvent->modifiers() & Qt::AltModifier)) {
+            // Only intercept if we're NOT in tag hotkey assignment mode
+            if (m_tagSidebar->awaitingHotkeyTagId() < 0) {
+                int rating = keyEvent->key() - Qt::Key_0;
+                setRatingSelected(rating);
+                return true;
+            }
+        }
+        
         // Handle tag hotkeys (0-9, A-Z, F1-F12)
         QString hotkeyText;
         
@@ -980,9 +1096,57 @@ void MainWindow::toggleFavoriteSelected()
     // setFavorites() already calls applyFilenameFilter() internally
     if (m_model) {
         m_model->setFavorites(m_favorites);
+        // Re-apply sorting if in ranking mode
+        if (m_sortMode == "ranking") {
+            m_model->sortByRanking(m_favorites, m_ratings);
+        }
     }
     
     // Save favorites
+    saveSettings();
+}
+
+void MainWindow::setRatingSelected(int rating)
+{
+    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    if (selectedPaths.isEmpty()) {
+        return;
+    }
+    
+    // Check if all selected images already have this exact rating — toggle off
+    bool allSameRating = true;
+    for (const QString& path : selectedPaths) {
+        if (m_ratings.value(path, 0) != rating) {
+            allSameRating = false;
+            break;
+        }
+    }
+    
+    if (allSameRating) {
+        // Remove rating
+        for (const QString& path : selectedPaths) {
+            m_ratings.remove(path);
+            if (m_model) {
+                m_model->setRating(path, 0);
+            }
+        }
+        m_statusLabel->setText(QString("Cleared rating from %1 image(s)").arg(selectedPaths.size()));
+    } else {
+        // Set rating
+        for (const QString& path : selectedPaths) {
+            m_ratings.insert(path, rating);
+            if (m_model) {
+                m_model->setRating(path, rating);
+            }
+        }
+        m_statusLabel->setText(QString("Rated %1 image(s) as %2").arg(selectedPaths.size()).arg(rating));
+    }
+    
+    // Re-apply sorting if in ranking mode
+    if (m_model && m_sortMode == "ranking") {
+        m_model->sortByRanking(m_favorites, m_ratings);
+    }
+    
     saveSettings();
 }
 

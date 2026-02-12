@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QSlider>
 #include <QLineEdit>
+#include <QComboBox>
 #include <QProgressBar>
 #include <QStackedWidget>
 #include <QAction>
@@ -60,6 +61,7 @@ private Q_SLOTS:
     void onImageTaggedForAlbum(const QString& imagePath, qint64 tagId);
     void onTagLinkedToFolder(qint64 tagId, const QString& albumPath);
     void toggleFavoriteSelected();
+    void setRatingSelected(int rating);
 
 private:
     void setupUI();
@@ -97,6 +99,7 @@ private:
     // Toolbar widgets
     QLineEdit* m_pathEdit = nullptr;
     QLineEdit* m_searchEdit = nullptr;
+    QComboBox* m_sortCombo = nullptr;
     QSlider* m_zoomSlider = nullptr;
     QLabel* m_zoomLabel = nullptr;
 
@@ -114,6 +117,14 @@ private:
     
     // Favorites system (separate from tags)
     QSet<QString> m_favorites;
+    
+    // Rating system (separate from tags, 1-5)
+    QHash<QString, int> m_ratings;
+    bool m_ratingHotkeysEnabled = true;
+    QAction* m_ratingHotkeysAction = nullptr;
+    
+    // Sort mode
+    QString m_sortMode = "default";
     
     // Album auto-move batching
     QTimer* m_albumRefreshTimer = nullptr;

@@ -63,7 +63,8 @@ enum ImageRole
     HasTagsRole,
     TagListRole,      // Returns QVariantList of tag info (name, color)
     MediaTypeRole,   // Returns MediaType enum value
-    IsFavoritedRole   // Returns bool indicating if item is favorited
+    IsFavoritedRole,  // Returns bool indicating if item is favorited
+    RatingRole        // Returns int 0-5 (0 = unrated)
 };
 
 /**
@@ -128,6 +129,15 @@ public:
     
     // Favorites system
     void setFavorites(const QSet<QString>& favorites);
+    
+    // Rating system (1-5, 0 = unrated; separate from tags)
+    void setRatings(const QHash<QString, int>& ratings);
+    void setRating(const QString& filePath, int rating);
+    int rating(const QString& filePath) const;
+    
+    // Sorting
+    void sortByRanking(const QSet<QString>& favorites, const QHash<QString, int>& ratings);
+    void sortDefault();
 
 Q_SIGNALS:
     void loadingStarted();
@@ -178,6 +188,9 @@ private:
     
     // Favorites system (separate from tags)
     QSet<QString> m_favorites;
+    
+    // Rating system (separate from tags, 1-5, 0 = unrated)
+    QHash<QString, int> m_ratings;
     
     // Thumbnail update batching — reduces UI thread pressure during active loading
     QTimer* m_thumbBatchTimer = nullptr;

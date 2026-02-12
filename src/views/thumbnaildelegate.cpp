@@ -123,6 +123,14 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         paintFavoriteStar(painter, thumbRect);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
+    
+    // Draw rating indicator (top-right corner)
+    int ratingValue = index.data(RatingRole).toInt();
+    if (ratingValue > 0) {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        paintRating(painter, thumbRect, ratingValue);
+        painter->setRenderHint(QPainter::Antialiasing, false);
+    }
 
     // Filename
     if (m_showFilename) {
@@ -300,6 +308,47 @@ void ThumbnailDelegate::paintFavoriteStar(QPainter* painter, const QRect& rect) 
     painter->setPen(QPen(QColor(0, 0, 0, 100), 1));
     painter->setBrush(QColor(255, 215, 0)); // Gold color
     painter->drawPath(starPath);
+}
+
+void ThumbnailDelegate::paintRating(QPainter* painter, const QRect& rect, int rating) const
+{
+    // Draw small filled circles in the top-right corner representing the rating (1-5)
+    // Each dot is colored based on the overall rating level
+    static const QColor ratingColors[] = {
+        QColor(0, 0, 0, 0),     // 0 - unused
+        QColor(244, 67, 54),     // 1 - red (reject/poor)
+        QColor(255, 152, 0),     // 2 - orange (below average)
+        QColor(255, 235, 59),    // 3 - yellow (average)
+        QColor(139, 195, 74),    // 4 - light green (good)
+        QColor(76, 175, 80)      // 5 - green (excellent)
+    };
+    
+    int dotSize = 6;
+    int dotSpacing = 3;
+    int margin = 5;
+    
+    // Calculate total width of dots
+    int totalWidth = rating * dotSize + (rating - 1) * dotSpacing;
+    
+    // Position in top-right corner
+    int startX = rect.right() - margin - totalWidth;
+    int y = rect.top() + margin;
+    
+    QColor dotColor = ratingColors[qBound(1, rating, 5)];
+    
+    // Draw shadow/background pill behind dots for visibility
+    QRect pillRect(startX - 3, y - 2, totalWidth + 6, dotSize + 4);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 160));
+    painter->drawRoundedRect(pillRect, (dotSize + 4) / 2.0, (dotSize + 4) / 2.0);
+    
+    // Draw the dots
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(dotColor);
+    for (int i = 0; i < rating; ++i) {
+        int dotX = startX + i * (dotSize + dotSpacing);
+        painter->drawEllipse(dotX, y, dotSize, dotSize);
+    }
 }
 
 void ThumbnailDelegate::paintHoverEffect(QPainter* painter, const QRect& rect) const

@@ -58,6 +58,7 @@ private Q_SLOTS:
     void toggleSidebar();
     void createAlbumFromSelection();
     void onImageTaggedForAlbum(const QString& imagePath, qint64 tagId);
+    void onTagLinkedToFolder(qint64 tagId, const QString& albumPath);
 
 private:
     void setupUI();

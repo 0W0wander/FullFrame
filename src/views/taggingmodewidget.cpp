@@ -681,6 +681,23 @@ void TaggingSidebarWidget::setupUI()
     
     connect(m_tagInput, &QLineEdit::returnPressed, this, &TaggingSidebarWidget::onTagEnterPressed);
     connect(m_tagInput, &AutoCompleteLineEdit::tabPressed, this, &TaggingSidebarWidget::onTabPressed);
+    
+    // When clicking an autocomplete suggestion, add the tag immediately (not just complete text).
+    // We set a flag so that if Enter also triggers returnPressed (for keyboard selection),
+    // we skip the duplicate call.
+    connect(m_tagCompleter, QOverload<const QString&>::of(&QCompleter::activated),
+            this, [this](const QString& text) {
+        m_tagInput->setText(text);
+        onTagEnterPressed();
+        // Set flag AFTER processing so the duplicate returnPressed (from Enter key) is skipped.
+        m_completerJustActivated = true;
+        // Clear the textbox and reset flag after event loop processes everything
+        // (this ensures the completer's default behavior doesn't interfere)
+        QTimer::singleShot(0, this, [this]() {
+            m_tagInput->clear();
+            m_completerJustActivated = false;
+        });
+    });
 }
 
 void TaggingSidebarWidget::setFilePath(const QString& filePath)
@@ -812,6 +829,13 @@ QString TaggingSidebarWidget::formatFileSize(qint64 bytes) const
 
 void TaggingSidebarWidget::onTagEnterPressed()
 {
+    // If the completer's activated signal already handled this, skip
+    // (prevents double-fire when pressing Enter on a highlighted suggestion)
+    if (m_completerJustActivated) {
+        m_completerJustActivated = false;
+        return;
+    }
+    
     QString tagName = m_tagInput->text().trimmed();
     
     // If empty, go to next image

@@ -233,6 +233,10 @@ void MainWindow::setupUI()
     connect(TagManager::instance(), &TagManager::imageTagged,
             this, &MainWindow::onImageTaggedForAlbum);
     
+    // When a tag is linked to a folder, retroactively move all existing tagged images
+    connect(TagManager::instance(), &TagManager::tagAlbumPathChanged,
+            this, &MainWindow::onTagLinkedToFolder);
+    
     // Install event filter to catch all key events for hotkeys
     qApp->installEventFilter(this);
 }
@@ -1254,6 +1258,79 @@ void MainWindow::onImageTaggedForAlbum(const QString& imagePath, qint64 tagId)
         TagManager::instance()->updateImagePath(imagePath, destPath);
         
         // Schedule a batched view refresh (avoids refreshing per-file in bulk operations)
+        if (!m_albumRefreshTimer) {
+            m_albumRefreshTimer = new QTimer(this);
+            m_albumRefreshTimer->setSingleShot(true);
+            m_albumRefreshTimer->setInterval(300);
+            connect(m_albumRefreshTimer, &QTimer::timeout, this, [this]() {
+                if (!m_currentFolder.isEmpty()) {
+                    openFolder(m_currentFolder);
+                }
+            });
+        }
+        m_albumRefreshTimer->start();
+    }
+}
+
+void MainWindow::onTagLinkedToFolder(qint64 tagId, const QString& albumPath)
+{
+    if (albumPath.isEmpty()) {
+        return;  // Tag was unlinked, nothing to move
+    }
+    
+    // Get all images that already have this tag
+    QStringList taggedImages = TagManager::instance()->imagesWithTag(tagId);
+    if (taggedImages.isEmpty()) {
+        return;
+    }
+    
+    QDir albumDir(albumPath);
+    if (!albumDir.exists()) {
+        QDir().mkpath(albumPath);
+    }
+    
+    int movedCount = 0;
+    
+    for (const QString& imagePath : taggedImages) {
+        QFileInfo fileInfo(imagePath);
+        
+        // Skip if already in the album folder
+        if (fileInfo.absolutePath() == albumDir.absolutePath()) {
+            continue;
+        }
+        
+        // Skip if the source file doesn't exist
+        if (!fileInfo.exists()) {
+            continue;
+        }
+        
+        QString destPath = albumDir.filePath(fileInfo.fileName());
+        
+        // Handle filename conflicts
+        if (QFile::exists(destPath)) {
+            QString baseName = fileInfo.completeBaseName();
+            QString suffix = fileInfo.suffix();
+            int counter = 1;
+            do {
+                destPath = albumDir.filePath(
+                    QString("%1_%2.%3").arg(baseName).arg(counter).arg(suffix));
+                counter++;
+            } while (QFile::exists(destPath));
+        }
+        
+        if (QFile::rename(imagePath, destPath)) {
+            TagManager::instance()->updateImagePath(imagePath, destPath);
+            movedCount++;
+        }
+    }
+    
+    if (movedCount > 0) {
+        Tag tag = TagManager::instance()->tag(tagId);
+        m_statusLabel->setText(
+            QString("Moved %1 existing image(s) to album \"%2\"")
+                .arg(movedCount).arg(tag.name));
+        
+        // Refresh the view
         if (!m_albumRefreshTimer) {
             m_albumRefreshTimer = new QTimer(this);
             m_albumRefreshTimer->setSingleShot(true);

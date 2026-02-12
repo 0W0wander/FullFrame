@@ -197,6 +197,7 @@ private:
     AutoCompleteLineEdit* m_tagInput;
     QCompleter* m_tagCompleter;
     QStringListModel* m_completerModel;
+    bool m_completerJustActivated = false;
 };
 
 /**

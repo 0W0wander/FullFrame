@@ -245,6 +245,7 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
     m_items.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
+    m_thumbDirtyRows.clear();
     m_currentDir = path;
     
     scanDirectory(path, recursive);
@@ -309,6 +310,7 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
     m_items.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
+    m_thumbDirtyRows.clear();
     m_currentDir.clear();
     
     for (const QString& path : filePaths) {
@@ -344,6 +346,7 @@ void ImageThumbnailModel::clear()
     m_items.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
+    m_thumbDirtyRows.clear();
     m_currentDir.clear();
     endResetModel();
 }

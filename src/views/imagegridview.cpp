@@ -18,6 +18,8 @@
 #include <QScrollBar>
 #include <QWheelEvent>
 #include <QContextMenuEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QApplication>
 #include <QDebug>
 
@@ -253,6 +255,20 @@ void ImageGridView::zoomOut()
 
 void ImageGridView::paintEvent(QPaintEvent* event)
 {
+    // WA_OpaquePaintEvent is set for scroll performance (skips the system
+    // background erase, avoiding a redundant fill + the flicker it can cause
+    // on some compositors).  The trade-off is that areas not covered by any
+    // item — e.g. the region below the last row after filtering reduces the
+    // item count — retain stale pixel data from the previous paint.
+    //
+    // Fix: fill the dirty region ourselves with the correct background color
+    // before letting QListView paint the items on top.  This is cheaper than
+    // removing WA_OpaquePaintEvent (which would use the wrong palette color
+    // and potentially flicker).
+    QPainter bgPainter(viewport());
+    bgPainter.fillRect(event->rect(), QColor(30, 30, 30));
+    bgPainter.end();
+
     QListView::paintEvent(event);
     // Don't trigger preload on paint - only on scroll/resize
     // This prevents constant re-requests that cause flickering

@@ -465,7 +465,7 @@ void MainWindow::setupStatusBar()
     cacheTimer->start(1000);
     
     // Connect to thumbnail loading thread for progress updates
-    connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailReady,
+    connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailAvailable,
             this, &MainWindow::onThumbnailReady);
     connect(ThumbnailLoadThread::instance(), &ThumbnailLoadThread::thumbnailFailed,
             this, &MainWindow::onThumbnailFailed);

@@ -214,10 +214,29 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         return;
     }
 
+    // Separate supertags from regular tags
+    QVariantList supertags;
+    QVariantList regularTags;
+    
+    for (const QVariant& tagVar : tags) {
+        QVariantMap tagInfo = tagVar.toMap();
+        bool isSupertag = tagInfo.value("isSupertag", false).toBool();
+        if (isSupertag) {
+            supertags.append(tagVar);
+        } else {
+            regularTags.append(tagVar);
+        }
+    }
+    
+    // Combine: supertags first, then regular tags
+    QVariantList sortedTags = supertags + regularTags;
+
     painter->setFont(m_badgeFont);
 
     int badgeHeight = 16;
+    int supertagHeight = 20;  // Larger for supertags
     int badgePadding = 6;
+    int supertagPadding = 8;  // More padding for supertags
     int badgeSpacing = 3;
     int badgeRadius = 3;
     int margin = 4;
@@ -228,14 +247,19 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
     int maxX = rect.right() - margin;
     int minY = rect.top() + margin;  // Don't draw above the thumbnail
 
-    for (const QVariant& tagVar : tags) {
+    for (const QVariant& tagVar : sortedTags) {
         QVariantMap tagInfo = tagVar.toMap();
         QString name = tagInfo["name"].toString();
         QString colorStr = tagInfo["color"].toString();
+        bool isSupertag = tagInfo.value("isSupertag", false).toBool();
+        
+        // Use larger size for supertags
+        int currentBadgeHeight = isSupertag ? supertagHeight : badgeHeight;
+        int currentPadding = isSupertag ? supertagPadding : badgePadding;
         
         // Calculate badge width
         int textWidth = m_badgeFM.horizontalAdvance(name);
-        int badgeWidth = textWidth + badgePadding * 2;
+        int badgeWidth = textWidth + currentPadding * 2;
         
         // Clamp badge width to available row width so very long tag names still fit
         if (badgeWidth > maxX - (rect.left() + margin)) {
@@ -245,7 +269,7 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         // Wrap to the next row above if this badge doesn't fit
         if (x + badgeWidth > maxX) {
             x = rect.left() + margin;
-            y -= (badgeHeight + badgeSpacing);
+            y -= (currentBadgeHeight + badgeSpacing);
             
             // Stop if we've run out of vertical space
             if (y < minY) {
@@ -253,10 +277,18 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
             }
         }
         
-        QRect badgeRect(x, y, badgeWidth, badgeHeight);
+        QRect badgeRect(x, y, badgeWidth, currentBadgeHeight);
         
         // Determine badge color
         QColor bgColor = colorStr.isEmpty() ? QColor(100, 100, 100) : QColor(colorStr);
+        
+        // Draw shadow for supertags
+        if (isSupertag) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(0, 0, 0, 100));
+            QRect shadowRect = badgeRect.translated(2, 2);
+            painter->drawRoundedRect(shadowRect, badgeRadius, badgeRadius);
+        }
         
         // Draw badge background with slight transparency
         painter->setPen(Qt::NoPen);
@@ -269,7 +301,7 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         int brightness = (bgColor.red() * 299 + bgColor.green() * 587 + bgColor.blue() * 114) / 1000;
         painter->setPen(brightness > 128 ? Qt::black : Qt::white);
         // Elide text if badge was clamped
-        QString displayName = m_badgeFM.elidedText(name, Qt::ElideRight, badgeWidth - badgePadding * 2);
+        QString displayName = m_badgeFM.elidedText(name, Qt::ElideRight, badgeWidth - currentPadding * 2);
         painter->drawText(badgeRect, Qt::AlignCenter, displayName);
         
         x += badgeWidth + badgeSpacing;

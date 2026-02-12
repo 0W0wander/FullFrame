@@ -88,6 +88,9 @@ bool TagManager::createTables()
     // Add album_path column if it doesn't exist (migration for existing databases)
     query.exec("ALTER TABLE tags ADD COLUMN album_path TEXT");
 
+    // Add is_supertag column to image_tags if it doesn't exist (migration for existing databases)
+    query.exec("ALTER TABLE image_tags ADD COLUMN is_supertag INTEGER DEFAULT 0");
+
     // Images table (stores image paths)
     if (!query.exec(R"(
         CREATE TABLE IF NOT EXISTS images (
@@ -398,7 +401,7 @@ qint64 TagManager::getOrCreateImageId(const QString& imagePath)
     return -1;
 }
 
-bool TagManager::tagImage(const QString& imagePath, qint64 tagId)
+bool TagManager::tagImage(const QString& imagePath, qint64 tagId, bool asSupertag)
 {
     qint64 imgId = getOrCreateImageId(imagePath);
     if (imgId < 0) {
@@ -406,9 +409,10 @@ bool TagManager::tagImage(const QString& imagePath, qint64 tagId)
     }
 
     QSqlQuery query(m_db);
-    query.prepare("INSERT OR IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)");
+    query.prepare("INSERT OR REPLACE INTO image_tags (image_id, tag_id, is_supertag) VALUES (?, ?, ?)");
     query.addBindValue(imgId);
     query.addBindValue(tagId);
+    query.addBindValue(asSupertag ? 1 : 0);
 
     if (query.exec()) {
         // Update cache
@@ -435,6 +439,54 @@ bool TagManager::untagImage(const QString& imagePath, qint64 tagId)
         m_imageTagCache[imagePath].remove(tagId);
         Q_EMIT imageUntagged(imagePath, tagId);
         return true;
+    }
+    return false;
+}
+
+bool TagManager::setSupertag(const QString& imagePath, qint64 tagId, bool isSupertag)
+{
+    qint64 imgId = imageId(imagePath);
+    if (imgId < 0) {
+        return false;
+    }
+
+    // First check if the tag is already associated with the image
+    if (!hasTag(imagePath, tagId)) {
+        // If not, add it first
+        if (!tagImage(imagePath, tagId, isSupertag)) {
+            return false;
+        }
+    } else {
+        // Update the supertag status
+        QSqlQuery query(m_db);
+        query.prepare("UPDATE image_tags SET is_supertag = ? WHERE image_id = ? AND tag_id = ?");
+        query.addBindValue(isSupertag ? 1 : 0);
+        query.addBindValue(imgId);
+        query.addBindValue(tagId);
+
+        if (!query.exec()) {
+            return false;
+        }
+    }
+
+    Q_EMIT imageTagged(imagePath, tagId);
+    return true;
+}
+
+bool TagManager::isSupertag(const QString& imagePath, qint64 tagId) const
+{
+    qint64 imgId = imageId(imagePath);
+    if (imgId < 0) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare("SELECT is_supertag FROM image_tags WHERE image_id = ? AND tag_id = ?");
+    query.addBindValue(imgId);
+    query.addBindValue(tagId);
+
+    if (query.exec() && query.next()) {
+        return query.value(0).toInt() != 0;
     }
     return false;
 }
@@ -468,11 +520,11 @@ QList<Tag> TagManager::tagsForImage(const QString& imagePath) const
 
     QSqlQuery query(m_db);
     query.prepare(R"(
-        SELECT t.id, t.name, t.color, t.hotkey, t.parent_id, t.album_path 
+        SELECT t.id, t.name, t.color, t.hotkey, t.parent_id, t.album_path, it.is_supertag
         FROM tags t 
         JOIN image_tags it ON t.id = it.tag_id 
         WHERE it.image_id = ?
-        ORDER BY t.name
+        ORDER BY it.is_supertag DESC, t.name
     )");
     query.addBindValue(imgId);
 
@@ -485,6 +537,7 @@ QList<Tag> TagManager::tagsForImage(const QString& imagePath) const
             t.hotkey = query.value(3).toString();
             t.parentId = query.value(4).toLongLong();
             t.albumPath = query.value(5).toString();
+            t.isSupertag = query.value(6).toInt() != 0;
             tags.append(t);
         }
     }

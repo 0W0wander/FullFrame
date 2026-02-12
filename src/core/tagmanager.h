@@ -27,6 +27,7 @@ struct Tag
     QString hotkey;  // Single key like "1", "A", "F1", etc.
     QString albumPath;  // Absolute path to album folder (empty for regular tags)
     qint64 parentId = -1;
+    bool isSupertag = false;  // Whether this tag is a supertag for the current image (context-dependent)
     
     bool isValid() const { return id >= 0; }
     bool hasHotkey() const { return !hotkey.isEmpty(); }
@@ -72,9 +73,11 @@ public:
     QList<Tag> childTags(qint64 parentId) const;
     
     // Image-tag associations
-    bool tagImage(const QString& imagePath, qint64 tagId);
+    bool tagImage(const QString& imagePath, qint64 tagId, bool asSupertag = false);
     bool untagImage(const QString& imagePath, qint64 tagId);
     bool hasTag(const QString& imagePath, qint64 tagId) const;
+    bool setSupertag(const QString& imagePath, qint64 tagId, bool isSupertag);
+    bool isSupertag(const QString& imagePath, qint64 tagId) const;
     
     // Get tags for image
     QList<Tag> tagsForImage(const QString& imagePath) const;

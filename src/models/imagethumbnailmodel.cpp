@@ -158,18 +158,18 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
                 return item.cachedTagList;
             }
             
-            // Rebuild and cache
-            QVariantList tagList;
-            tagList.reserve(item.tagIds.size());
+            // Rebuild and cache - get tags with supertag info from TagManager
+            QList<Tag> tags = TagManager::instance()->tagsForImage(item.filePath);
             
-            for (qint64 tagId : item.tagIds) {
-                Tag tag = TagManager::instance()->tag(tagId);
-                if (tag.isValid()) {
-                    QVariantMap tagInfo;
-                    tagInfo.insert(QStringLiteral("name"), tag.name);
-                    tagInfo.insert(QStringLiteral("color"), tag.color);
-                    tagList.append(tagInfo);
-                }
+            QVariantList tagList;
+            tagList.reserve(tags.size());
+            
+            for (const Tag& tag : tags) {
+                QVariantMap tagInfo;
+                tagInfo.insert(QStringLiteral("name"), tag.name);
+                tagInfo.insert(QStringLiteral("color"), tag.color);
+                tagInfo.insert(QStringLiteral("isSupertag"), tag.isSupertag);
+                tagList.append(tagInfo);
             }
             item.cachedTagList = tagList;
             item.tagListDirty = false;

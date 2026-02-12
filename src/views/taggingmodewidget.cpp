@@ -21,6 +21,9 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QGridLayout>
+#include <QGraphicsDropShadowEffect>
+#include <QApplication>
+#include <QEventLoop>
 
 namespace FullFrame {
 
@@ -744,20 +747,51 @@ void TaggingSidebarWidget::updateFileInfo()
 
 void TaggingSidebarWidget::updateTags()
 {
-    // Clear existing tags from flow widget
-    if (m_tagsFlowWidget->layout()) {
-        QLayout* oldLayout = m_tagsFlowWidget->layout();
-        QLayoutItem* item;
-        while ((item = oldLayout->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
+    // Safety check
+    if (!m_tagsFlowWidget || !m_tagsContainer) {
+        return;
+    }
+    
+    // Simplest and safest approach: delete and recreate the flow widget
+    // This avoids all the complex nested layout deletion issues
+    QLayout* containerLayout = m_tagsContainer->layout();
+    if (containerLayout) {
+        // Remove the old flow widget from container
+        containerLayout->removeWidget(m_tagsFlowWidget);
+    }
+    
+    // Delete the old flow widget (Qt will handle all child widgets automatically)
+    m_tagsFlowWidget->deleteLater();
+    m_tagsFlowWidget = nullptr;
+    
+    // Process events to ensure deletion happens
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    
+    // Create a new flow widget
+    m_tagsFlowWidget = new QWidget(m_tagsContainer);
+    m_tagsFlowWidget->setStyleSheet("background: transparent;");
+    m_tagsFlowWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    
+    // Re-add to container layout
+    if (containerLayout) {
+        // Cast to QVBoxLayout to use insertWidget (which QVBoxLayout has)
+        QVBoxLayout* vboxLayout = qobject_cast<QVBoxLayout*>(containerLayout);
+        if (vboxLayout) {
+            // Insert before the stretch (which is at the end)
+            int stretchIndex = vboxLayout->count() - 1;
+            if (stretchIndex >= 0) {
+                vboxLayout->insertWidget(stretchIndex, m_tagsFlowWidget);
+            } else {
+                vboxLayout->addWidget(m_tagsFlowWidget);
+            }
+        } else {
+            // Fallback for other layout types
+            containerLayout->addWidget(m_tagsFlowWidget);
         }
-        delete oldLayout;
     }
     
     if (m_filePath.isEmpty()) {
         m_noTagsLabel->show();
-        m_tagsFlowWidget->hide();
         return;
     }
     
@@ -772,13 +806,42 @@ void TaggingSidebarWidget::updateTags()
     m_noTagsLabel->hide();
     m_tagsFlowWidget->show();
     
-    // Use horizontal layout with wrapping behavior
-    QHBoxLayout* flowLayout = new QHBoxLayout(m_tagsFlowWidget);
-    flowLayout->setContentsMargins(0, 0, 0, 0);
-    flowLayout->setSpacing(3);  // Tight spacing like gallery badges
-    flowLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    // Use vertical layout with horizontal rows that wrap
+    QVBoxLayout* mainLayout = new QVBoxLayout(m_tagsFlowWidget);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(3);
+    mainLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    
+    // Tags are already sorted by supertag first (from TagManager::tagsForImage)
+    // Get available width from the scroll area or use a reasonable default
+    int availableWidth = m_tagsScrollArea->width() - 40;  // Account for margins/padding and scrollbar
+    if (availableWidth < 100) availableWidth = 250;  // Default width if not yet sized
+    
+    QHBoxLayout* currentRow = nullptr;
+    int currentRowWidth = 0;
+    int badgeSpacing = 3;
     
     for (const Tag& tag : tags) {
+        bool isSupertag = tag.isSupertag;
+        int badgeHeight = isSupertag ? 20 : 16;
+        int badgePadding = isSupertag ? 8 : 6;
+        int fontSize = isSupertag ? 9 : 8;
+        
+        // Estimate badge width
+        QFontMetrics fm(QFont("", fontSize));
+        int textWidth = fm.horizontalAdvance(QString("%1 ×").arg(tag.name));
+        int badgeWidth = textWidth + badgePadding * 2;
+        
+        // Create new row if needed
+        if (!currentRow || (currentRowWidth + badgeWidth + badgeSpacing > availableWidth && currentRowWidth > 0)) {
+            currentRow = new QHBoxLayout();
+            currentRow->setContentsMargins(0, 0, 0, 0);
+            currentRow->setSpacing(badgeSpacing);
+            currentRow->setAlignment(Qt::AlignLeft);
+            mainLayout->addLayout(currentRow);
+            currentRowWidth = 0;
+        }
+        
         QPushButton* tagBadge = new QPushButton(m_tagsFlowWidget);
         tagBadge->setText(QString("%1 ×").arg(tag.name));
         tagBadge->setCursor(Qt::PointingHandCursor);
@@ -787,36 +850,52 @@ void TaggingSidebarWidget::updateTags()
         QColor bgColor = QColor(tag.color);
         QColor textColor = (bgColor.lightness() > 128) ? QColor(20, 20, 20) : QColor(255, 255, 255);
         
-        // Exact match to gallery badge style from ThumbnailDelegate::paintTagBadges
-        // 8pt font, 16px height, 6px padding, 3px radius
+        // Style with shadow for supertags
+        QString shadowStyle = isSupertag ? 
+            QString("QPushButton { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4); }") : "";
+        
         tagBadge->setStyleSheet(QString(R"(
             QPushButton {
                 background-color: %1;
                 border: none;
                 border-radius: 3px;
-                padding: 1px 6px;
-                min-height: 14px;
-                max-height: 16px;
-                color: %2;
-                font-size: 8pt;
+                padding: %2px %3px;
+                min-height: %4px;
+                max-height: %4px;
+                color: %5;
+                font-size: %6pt;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: %3;
+                background-color: %7;
             }
         )").arg(bgColor.name())
+           .arg(isSupertag ? 2 : 1)
+           .arg(badgePadding)
+           .arg(badgeHeight)
            .arg(textColor.name())
+           .arg(fontSize)
            .arg(bgColor.darker(115).name()));
+        
+        // Add shadow effect for supertags
+        if (isSupertag) {
+            QGraphicsDropShadowEffect* shadow = new QGraphicsDropShadowEffect(tagBadge);
+            shadow->setBlurRadius(4);
+            shadow->setColor(QColor(0, 0, 0, 100));
+            shadow->setOffset(2, 2);
+            tagBadge->setGraphicsEffect(shadow);
+        }
         
         qint64 tagId = tag.id;
         connect(tagBadge, &QPushButton::clicked, this, [this, tagId]() {
             Q_EMIT tagClicked(tagId);
         });
         
-        flowLayout->addWidget(tagBadge);
+        currentRow->addWidget(tagBadge);
+        currentRowWidth += badgeWidth + badgeSpacing;
     }
     
-    flowLayout->addStretch();  // Push tags to the left
+    mainLayout->addStretch();  // Push tags to the top
 }
 
 QString TaggingSidebarWidget::formatFileSize(qint64 bytes) const

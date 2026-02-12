@@ -1063,14 +1063,14 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
         
         // Handle tag hotkeys (0-9, A-Z, F1-F12)
         QString hotkeyText;
+        bool isCtrlPressed = (keyEvent->modifiers() & Qt::ControlModifier) != 0;
         
         // Number keys
         if (keyEvent->key() >= Qt::Key_0 && keyEvent->key() <= Qt::Key_9) {
             hotkeyText = QString::number(keyEvent->key() - Qt::Key_0);
         }
-        // Letter keys (only without Ctrl/Alt modifiers)
+        // Letter keys (with or without Ctrl modifier)
         else if (keyEvent->key() >= Qt::Key_A && keyEvent->key() <= Qt::Key_Z &&
-                 !(keyEvent->modifiers() & Qt::ControlModifier) &&
                  !(keyEvent->modifiers() & Qt::AltModifier)) {
             hotkeyText = QChar('A' + (keyEvent->key() - Qt::Key_A));
         }
@@ -1080,8 +1080,24 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
         }
         
         if (!hotkeyText.isEmpty()) {
-            if (m_tagSidebar->handleHotkey(hotkeyText)) {
-                return true;
+            // Handle Ctrl+keybind for supertags
+            if (isCtrlPressed) {
+                Tag tag = TagManager::instance()->tagByHotkey(hotkeyText);
+                if (tag.isValid()) {
+                    QStringList selectedPaths = m_gridView->selectedImagePaths();
+                    if (!selectedPaths.isEmpty()) {
+                        // Apply as supertag to all selected images
+                        for (const QString& path : selectedPaths) {
+                            TagManager::instance()->setSupertag(path, tag.id, true);
+                        }
+                        return true;
+                    }
+                }
+            } else {
+                // Regular tag hotkey handling
+                if (m_tagSidebar->handleHotkey(hotkeyText)) {
+                    return true;
+                }
             }
         }
     }

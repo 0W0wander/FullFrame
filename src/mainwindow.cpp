@@ -597,10 +597,24 @@ void MainWindow::onZoomSliderChanged(int value)
 
 void MainWindow::onTagFilterChanged(const QSet<qint64>& tagIds)
 {
+    // Remember current selection so we can restore it after the model reloads
+    QString currentPath;
+    if (!m_isTaggingMode) {
+        QStringList sel = m_gridView->selectedImagePaths();
+        if (!sel.isEmpty()) {
+            currentPath = sel.first();
+        }
+    }
+
     if (tagIds.isEmpty()) {
         m_model->clearTagFilter();
     } else {
         m_model->setTagFilter(tagIds, false);  // false = any tag matches
+    }
+
+    // Restore grid view position if possible
+    if (!m_isTaggingMode && !currentPath.isEmpty()) {
+        m_gridView->scrollToImage(currentPath);
     }
 }
 

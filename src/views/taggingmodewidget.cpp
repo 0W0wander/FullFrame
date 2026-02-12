@@ -1148,6 +1148,12 @@ void TaggingModeWidget::onCurrentChanged(const QModelIndex& current, const QMode
 
 void TaggingModeWidget::onModelReset()
 {
+    // Remember the current image path so we can try to re-select it
+    // after a filter change (only capture if we don't already have a pending path).
+    if (m_pendingSelectPath.isEmpty() && !m_currentImagePath.isEmpty()) {
+        m_pendingSelectPath = m_currentImagePath;
+    }
+
     m_currentImagePath.clear();
     m_previewWidget->clear();
     m_sidebar->setFilePath(QString());
@@ -1160,13 +1166,32 @@ void TaggingModeWidget::onModelReset()
             // the timer callback so the second invocation still sees it.
             QTimer::singleShot(100, this, [this, row]() {
                 m_pendingSelectRow = -1;
+                m_pendingSelectPath.clear();
                 selectByRow(row);
+            });
+        } else if (!m_pendingSelectPath.isEmpty()) {
+            QString savedPath = m_pendingSelectPath;
+            QTimer::singleShot(100, this, [this, savedPath]() {
+                m_pendingSelectPath.clear();
+                // Try to re-select the previous image if it's in the new model
+                for (int i = 0; i < m_model->rowCount(); ++i) {
+                    QModelIndex idx = m_model->index(i);
+                    if (idx.data(FilePathRole).toString() == savedPath) {
+                        m_thumbnailStrip->setCurrentIndex(idx);
+                        m_thumbnailStrip->scrollTo(idx);
+                        onThumbnailClicked(idx);
+                        return;
+                    }
+                }
+                // Image not in filtered set — select first
+                selectFirst();
             });
         } else {
             QTimer::singleShot(100, this, &TaggingModeWidget::selectFirst);
         }
     } else {
         m_pendingSelectRow = -1;
+        m_pendingSelectPath.clear();
     }
     
     updateTagCompleter();

@@ -264,6 +264,7 @@ private:
     // Current state
     QString m_currentImagePath;
     int m_pendingSelectRow = -1;
+    QString m_pendingSelectPath;  // Try to re-select this path after model reset
 };
 
 } // namespace FullFrame

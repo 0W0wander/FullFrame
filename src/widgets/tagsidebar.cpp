@@ -306,6 +306,29 @@ void TagSidebar::setupUI()
     
     layout->addLayout(buttonRow);
 
+    // Tag search bar
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText("Search tags...");
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setStyleSheet(R"(
+        QLineEdit {
+            background-color: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 3px;
+            padding: 4px 8px;
+            color: #d0d0d0;
+            font-size: 11px;
+        }
+        QLineEdit:focus {
+            border-color: #0078d4;
+        }
+        QLineEdit::placeholder {
+            color: #606060;
+        }
+    )");
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &TagSidebar::filterTagCards);
+    layout->addWidget(m_searchEdit);
+
     // Scroll area for tags
     m_scrollArea = new QScrollArea(this);
     m_scrollArea->setWidgetResizable(true);
@@ -480,6 +503,21 @@ void TagSidebar::updateTagCards()
     
     // Add stretch back
     m_tagLayout->addStretch();
+    
+    // Re-apply search filter
+    filterTagCards(m_searchEdit->text());
+}
+
+void TagSidebar::filterTagCards(const QString& text)
+{
+    QString filter = text.trimmed().toLower();
+    for (TagCard* card : m_tagCards) {
+        if (filter.isEmpty()) {
+            card->setVisible(true);
+        } else {
+            card->setVisible(card->tagName().toLower().contains(filter));
+        }
+    }
 }
 
 QSet<qint64> TagSidebar::selectedTagIds() const
@@ -605,15 +643,8 @@ void TagSidebar::onTagCardClicked(qint64 tagId)
         }
     }
     
-    // If we have images selected, apply/remove tag immediately
-    if (!m_selectedImagePaths.isEmpty()) {
-        if (m_selectedTags.contains(tagId)) {
-            applyTagToSelection(tagId);
-        } else {
-            removeTagFromSelection(tagId);
-        }
-    }
-    
+    // Clicking a tag card is purely for filtering the view.
+    // Tag application is handled separately via hotkeys (handleHotkey → toggleTagOnSelection).
     Q_EMIT tagFilterChanged(m_selectedTags);
 }
 

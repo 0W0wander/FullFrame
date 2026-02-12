@@ -114,6 +114,7 @@ private:
     void setupUI();
     void loadTags();
     void updateTagCards();
+    void filterTagCards(const QString& text);
     void clearAwaitingHotkey();
     QColor generateTagColor() const;
     void applyTagToSelection(qint64 tagId);
@@ -124,6 +125,7 @@ private:
     QScrollArea* m_scrollArea;
     QWidget* m_tagContainer;
     QVBoxLayout* m_tagLayout;
+    QLineEdit* m_searchEdit;
     QLineEdit* m_newTagEdit;
     QPushButton* m_createButton;
     QPushButton* m_untaggedButton;

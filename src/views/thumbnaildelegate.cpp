@@ -204,6 +204,7 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
     int x = rect.left() + margin;
     int y = rect.bottom() - badgeHeight - margin;
     int maxX = rect.right() - margin;
+    int minY = rect.top() + margin;  // Don't draw above the thumbnail
 
     for (const QVariant& tagVar : tags) {
         QVariantMap tagInfo = tagVar.toMap();
@@ -214,14 +215,20 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         int textWidth = m_badgeFM.horizontalAdvance(name);
         int badgeWidth = textWidth + badgePadding * 2;
         
-        // Check if we have room for this badge
+        // Clamp badge width to available row width so very long tag names still fit
+        if (badgeWidth > maxX - (rect.left() + margin)) {
+            badgeWidth = maxX - (rect.left() + margin);
+        }
+        
+        // Wrap to the next row above if this badge doesn't fit
         if (x + badgeWidth > maxX) {
-            // Show "..." indicator if we can't fit all tags
-            if (x + 20 <= maxX) {
-                painter->setPen(Qt::white);
-                painter->drawText(x, y, 20, badgeHeight, Qt::AlignCenter, "...");
+            x = rect.left() + margin;
+            y -= (badgeHeight + badgeSpacing);
+            
+            // Stop if we've run out of vertical space
+            if (y < minY) {
+                break;
             }
-            break;
         }
         
         QRect badgeRect(x, y, badgeWidth, badgeHeight);
@@ -239,7 +246,9 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         // Draw text - use white or black depending on background brightness
         int brightness = (bgColor.red() * 299 + bgColor.green() * 587 + bgColor.blue() * 114) / 1000;
         painter->setPen(brightness > 128 ? Qt::black : Qt::white);
-        painter->drawText(badgeRect, Qt::AlignCenter, name);
+        // Elide text if badge was clamped
+        QString displayName = m_badgeFM.elidedText(name, Qt::ElideRight, badgeWidth - badgePadding * 2);
+        painter->drawText(badgeRect, Qt::AlignCenter, displayName);
         
         x += badgeWidth + badgeSpacing;
     }

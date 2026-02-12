@@ -60,6 +60,7 @@ private:
                            bool hasTags) const;
     void paintTagBadges(QPainter* painter, const QRect& rect,
                         const QVariantList& tags) const;
+    void paintFavoriteStar(QPainter* painter, const QRect& rect) const;
     void paintHoverEffect(QPainter* painter, const QRect& rect) const;
 
 private:

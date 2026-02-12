@@ -59,6 +59,7 @@ private Q_SLOTS:
     void createAlbumFromSelection();
     void onImageTaggedForAlbum(const QString& imagePath, qint64 tagId);
     void onTagLinkedToFolder(qint64 tagId, const QString& albumPath);
+    void toggleFavoriteSelected();
 
 private:
     void setupUI();
@@ -89,7 +90,9 @@ private:
     QAction* m_galleryModeAction = nullptr;
     QAction* m_taggingModeAction = nullptr;
     QAction* m_toggleSidebarAction = nullptr;
+    QAction* m_showAlbumFilesAction = nullptr;
     bool m_isTaggingMode = false;
+    bool m_showAlbumFiles = true;
 
     // Toolbar widgets
     QLineEdit* m_pathEdit = nullptr;
@@ -108,6 +111,9 @@ private:
     QString m_currentFolder;
     int m_pendingThumbnails = 0;
     int m_totalThumbnails = 0;
+    
+    // Favorites system (separate from tags)
+    QSet<QString> m_favorites;
     
     // Album auto-move batching
     QTimer* m_albumRefreshTimer = nullptr;

@@ -62,7 +62,8 @@ enum ImageRole
     SelectedRole,
     HasTagsRole,
     TagListRole,      // Returns QVariantList of tag info (name, color)
-    MediaTypeRole     // Returns MediaType enum value
+    MediaTypeRole,   // Returns MediaType enum value
+    IsFavoritedRole   // Returns bool indicating if item is favorited
 };
 
 /**
@@ -120,6 +121,13 @@ public:
     
     // Filename filtering (in-memory, instant — no disk I/O)
     void setFilenameFilter(const QString& filter);
+    
+    // Album file filtering
+    void setShowAlbumFiles(bool show);
+    bool showAlbumFiles() const { return m_showAlbumFiles; }
+    
+    // Favorites system
+    void setFavorites(const QSet<QString>& favorites);
 
 Q_SIGNALS:
     void loadingStarted();
@@ -145,6 +153,8 @@ private:
     void scanDirectory(const QString& path, bool recursive);
     bool matchesTagFilter(const ImageItem& item) const;
     void applyFilenameFilter();
+    bool isInAlbumFolder(const QString& filePath) const;
+    bool isFavorited(const QString& filePath) const;
 
 private:
     QList<ImageItem> m_items;         // Currently visible items (after all filters)
@@ -162,6 +172,12 @@ private:
     
     // Filename filter (applied in-memory on top of tag filter)
     QString m_filenameFilter;
+    
+    // Album file filtering
+    bool m_showAlbumFiles = true;
+    
+    // Favorites system (separate from tags)
+    QSet<QString> m_favorites;
     
     // Thumbnail update batching — reduces UI thread pressure during active loading
     QTimer* m_thumbBatchTimer = nullptr;

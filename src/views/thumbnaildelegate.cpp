@@ -6,9 +6,12 @@
 
 #include "thumbnaildelegate.h"
 #include "imagethumbnailmodel.h"
+#include "tagmanager.h"
 
 #include <QPainter>
 #include <QApplication>
+#include <QPainterPath>
+#include <cmath>
 
 namespace FullFrame {
 
@@ -101,6 +104,9 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
+    // Check if item is favorited (using favorites set, not tags)
+    bool isFavorited = index.data(IsFavoritedRole).toBool();
+    
     // Tag badges — only query model if item has tags (fast HasTagsRole check first)
     if (index.data(HasTagsRole).toBool()) {
         QVariantList tagList = index.data(TagListRole).toList();
@@ -109,6 +115,13 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             paintTagBadges(painter, thumbRect, tagList);
             painter->setRenderHint(QPainter::Antialiasing, false);
         }
+    }
+    
+    // Draw favorite star icon (always show if favorited, even if no other tags)
+    if (isFavorited) {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        paintFavoriteStar(painter, thumbRect);
+        painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
     // Filename
@@ -252,6 +265,41 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
         
         x += badgeWidth + badgeSpacing;
     }
+}
+
+void ThumbnailDelegate::paintFavoriteStar(QPainter* painter, const QRect& rect) const
+{
+    // Draw a small star icon in the bottom left corner
+    int starSize = 16;
+    int margin = 4;
+    int x = rect.left() + margin;
+    int y = rect.bottom() - starSize - margin;
+    
+    // Create a star shape
+    QPainterPath starPath;
+    QPointF center(x + starSize / 2.0, y + starSize / 2.0);
+    double outerRadius = starSize / 2.0;
+    double innerRadius = outerRadius * 0.4;
+    int points = 5;
+    
+    for (int i = 0; i < points * 2; ++i) {
+        double angle = (i * M_PI) / points;
+        double radius = (i % 2 == 0) ? outerRadius : innerRadius;
+        double px = center.x() + radius * cos(angle - M_PI / 2.0);
+        double py = center.y() + radius * sin(angle - M_PI / 2.0);
+        
+        if (i == 0) {
+            starPath.moveTo(px, py);
+        } else {
+            starPath.lineTo(px, py);
+        }
+    }
+    starPath.closeSubpath();
+    
+    // Draw star with yellow/gold color and slight shadow
+    painter->setPen(QPen(QColor(0, 0, 0, 100), 1));
+    painter->setBrush(QColor(255, 215, 0)); // Gold color
+    painter->drawPath(starPath);
 }
 
 void ThumbnailDelegate::paintHoverEffect(QPainter* painter, const QRect& rect) const

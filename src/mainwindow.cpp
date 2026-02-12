@@ -135,7 +135,7 @@ void MainWindow::initializeDatabase()
         
         qint64 id4 = TagManager::instance()->createTag("Favorite", "#e91e63");
         if (id4 >= 0) {
-            TagManager::instance()->setTagHotkey(id4, "A");
+            TagManager::instance()->setTagHotkey(id4, "F");
         }
     }
 }
@@ -317,6 +317,20 @@ void MainWindow::setupMenuBar()
     // Preferences menu
     QMenu* prefsMenu = menuBar->addMenu("&Preferences");
     
+    m_showAlbumFilesAction = prefsMenu->addAction("Show &Album Files");
+    m_showAlbumFilesAction->setCheckable(true);
+    m_showAlbumFilesAction->setChecked(m_showAlbumFiles);
+    connect(m_showAlbumFilesAction, &QAction::toggled, this, [this](bool checked) {
+        m_showAlbumFiles = checked;
+        m_model->setShowAlbumFiles(checked);
+        // Refresh the current folder if one is open
+        if (!m_currentFolder.isEmpty()) {
+            openFolder(m_currentFolder);
+        }
+    });
+    
+    prefsMenu->addSeparator();
+    
     QAction* openDbFolderAction = prefsMenu->addAction("Open &Database Folder...");
     connect(openDbFolderAction, &QAction::triggered, this, [this]() {
         QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -388,7 +402,12 @@ void MainWindow::setupToolBar()
     )");
     layout->addWidget(m_pathEdit, 1);
 
-    // Search bar
+    // Search bar with button
+    QWidget* searchWidget = new QWidget(this);
+    QHBoxLayout* searchLayout = new QHBoxLayout(searchWidget);
+    searchLayout->setContentsMargins(0, 0, 0, 0);
+    searchLayout->setSpacing(4);
+    
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("🔎 Search by filename...");
     m_searchEdit->setClearButtonEnabled(true);
@@ -407,10 +426,46 @@ void MainWindow::setupToolBar()
             border: 1px solid #005a9e;
         }
     )");
-    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
-        m_model->setFilenameFilter(text);
+    // Helper lambda to apply the filter
+    auto applySearchFilter = [this]() {
+        m_model->setFilenameFilter(m_searchEdit->text());
+    };
+    
+    // Filter on Enter key press
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, applySearchFilter);
+    
+    // Filter immediately when text is cleared (for better UX with clear button)
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this, applySearchFilter](const QString& text) {
+        if (text.isEmpty()) {
+            applySearchFilter();
+        }
     });
-    layout->addWidget(m_searchEdit);
+    
+    searchLayout->addWidget(m_searchEdit);
+    
+    // Search button with magnifying glass icon
+    QPushButton* searchButton = new QPushButton("🔍", this);
+    searchButton->setFixedSize(32, 32);
+    searchButton->setToolTip("Search");
+    searchButton->setStyleSheet(R"(
+        QPushButton {
+            background-color: #005a9e;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
+        }
+        QPushButton:hover {
+            background-color: #0068b8;
+        }
+        QPushButton:pressed {
+            background-color: #004c87;
+        }
+    )");
+    connect(searchButton, &QPushButton::clicked, this, applySearchFilter);
+    searchLayout->addWidget(searchButton);
+    
+    layout->addWidget(searchWidget);
 
     // Zoom controls
     QLabel* zoomIcon = new QLabel("🔍", this);
@@ -761,6 +816,21 @@ void MainWindow::loadSettings()
     int thumbnailSize = settings.value("thumbnailSize", 256).toInt();
     m_gridView->setThumbnailSize(thumbnailSize);
     
+    m_showAlbumFiles = settings.value("showAlbumFiles", true).toBool();
+    if (m_showAlbumFilesAction) {
+        m_showAlbumFilesAction->setChecked(m_showAlbumFiles);
+    }
+    if (m_model) {
+        m_model->setShowAlbumFiles(m_showAlbumFiles);
+    }
+    
+    // Load favorites
+    QStringList favoritesList = settings.value("favorites").toStringList();
+    m_favorites = QSet<QString>(favoritesList.begin(), favoritesList.end());
+    if (m_model) {
+        m_model->setFavorites(m_favorites);
+    }
+    
     QString lastFolder = settings.value("lastFolder").toString();
     if (!lastFolder.isEmpty() && QDir(lastFolder).exists()) {
         openFolder(lastFolder);
@@ -775,6 +845,8 @@ void MainWindow::saveSettings()
     settings.setValue("windowState", saveState());
     settings.setValue("thumbnailSize", m_gridView->thumbnailSize());
     settings.setValue("lastFolder", m_currentFolder);
+    settings.setValue("showAlbumFiles", m_showAlbumFiles);
+    settings.setValue("favorites", QStringList(m_favorites.begin(), m_favorites.end()));
 }
 
 // ============== Events ==============
@@ -837,6 +909,15 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
             return true;
         }
         
+        // Handle 'f' key for favorites (before tag hotkeys)
+        // Qt::Key_F represents both uppercase and lowercase 'F'
+        if (keyEvent->key() == Qt::Key_F &&
+            !(keyEvent->modifiers() & Qt::ControlModifier) &&
+            !(keyEvent->modifiers() & Qt::AltModifier)) {
+            toggleFavoriteSelected();
+            return true;
+        }
+        
         // Handle tag hotkeys (0-9, A-Z, F1-F12)
         QString hotkeyText;
         
@@ -863,6 +944,46 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
     }
     
     return QMainWindow::eventFilter(obj, event);
+}
+
+void MainWindow::toggleFavoriteSelected()
+{
+    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    if (selectedPaths.isEmpty()) {
+        return;
+    }
+    
+    // Check if all selected images are favorited
+    bool allFavorited = true;
+    for (const QString& path : selectedPaths) {
+        if (!m_favorites.contains(path)) {
+            allFavorited = false;
+            break;
+        }
+    }
+    
+    if (allFavorited) {
+        // Remove from favorites
+        for (const QString& path : selectedPaths) {
+            m_favorites.remove(path);
+        }
+        m_statusLabel->setText(QString("Removed %1 from favorites").arg(selectedPaths.size()));
+    } else {
+        // Add to favorites
+        for (const QString& path : selectedPaths) {
+            m_favorites.insert(path);
+        }
+        m_statusLabel->setText(QString("Added %1 to favorites").arg(selectedPaths.size()));
+    }
+    
+    // Update the model to refresh the view
+    // setFavorites() already calls applyFilenameFilter() internally
+    if (m_model) {
+        m_model->setFavorites(m_favorites);
+    }
+    
+    // Save favorites
+    saveSettings();
 }
 
 void MainWindow::deleteSelectedImages()

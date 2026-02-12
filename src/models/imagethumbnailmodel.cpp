@@ -179,6 +179,9 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
         case MediaTypeRole:
             return static_cast<int>(item.mediaType);
             
+        case IsFavoritedRole:
+            return isFavorited(item.filePath);
+            
         case Qt::ToolTipRole:
             return QString("%1\n%2\n%3")
                 .arg(item.fileName)
@@ -251,17 +254,27 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
     
     scanDirectory(path, recursive);
     
-    // scanDirectory populates m_items — save the full set before filename filter
-    m_allItems = m_items;
+    // scanDirectory now populates m_allItems with all items (after tag filter)
+    // and m_items with items after album file filter. We need to apply
+    // album file filter to m_allItems to get m_items, then apply filename filter.
+    
+    // Apply album file filter (but always show favorites)
+    m_items.clear();
+    for (const ImageItem& item : m_allItems) {
+        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
+            m_items.append(item);
+        }
+    }
     
     // Apply filename filter if one is active
     if (!m_filenameFilter.isEmpty()) {
-        m_items.clear();
-        for (const ImageItem& item : m_allItems) {
+        QList<ImageItem> filenameFiltered;
+        for (const ImageItem& item : m_items) {
             if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
-                m_items.append(item);
+                filenameFiltered.append(item);
             }
         }
+        m_items = filenameFiltered;
     }
     
     // Build path lookup
@@ -306,16 +319,15 @@ void ImageThumbnailModel::scanDirectory(const QString& path, bool recursive)
             item.tagIds = TagManager::instance()->tagIdsForImage(item.filePath);
         }
         
-        // Apply tag filter
-        if (!matchesTagFilter(item)) {
-            continue;
+        // Apply tag filter only - add all matching items to m_allItems
+        // Album file filtering will be applied later in loadDirectory/applyFilenameFilter
+        if (matchesTagFilter(item)) {
+            m_allItems.append(item);
         }
-        
-        m_items.append(item);
     }
     
     // Sort by name by default
-    std::sort(m_items.begin(), m_items.end(), [](const ImageItem& a, const ImageItem& b) {
+    std::sort(m_allItems.begin(), m_allItems.end(), [](const ImageItem& a, const ImageItem& b) {
         return a.fileName.compare(b.fileName, Qt::CaseInsensitive) < 0;
     });
 }
@@ -354,11 +366,19 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
         }
     }
     
+    // Apply album file filter (but always show favorites)
+    QList<ImageItem> filteredItems;
+    for (const ImageItem& item : m_allItems) {
+        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
+            filteredItems.append(item);
+        }
+    }
+    
     // Apply filename filter
     if (m_filenameFilter.isEmpty()) {
-        m_items = m_allItems;
+        m_items = filteredItems;
     } else {
-        for (const ImageItem& item : m_allItems) {
+        for (const ImageItem& item : filteredItems) {
             if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
                 m_items.append(item);
             }
@@ -547,6 +567,59 @@ void ImageThumbnailModel::clearTagFilter()
     }
 }
 
+// ============== Album File Filtering ==============
+
+void ImageThumbnailModel::setShowAlbumFiles(bool show)
+{
+    if (m_showAlbumFiles == show) {
+        return;  // No change
+    }
+    m_showAlbumFiles = show;
+    applyFilenameFilter();  // Reapply filters
+}
+
+bool ImageThumbnailModel::isInAlbumFolder(const QString& filePath) const
+{
+    if (!TagManager::instance()->isInitialized()) {
+        return false;
+    }
+    
+    QFileInfo fileInfo(filePath);
+    QString fileDir = QDir(fileInfo.absolutePath()).absolutePath();
+    
+    // Check if the file's directory matches any album path
+    QList<Tag> allTags = TagManager::instance()->allTags();
+    for (const Tag& tag : allTags) {
+        if (tag.isAlbumTag()) {
+            QString albumPath = QDir(tag.albumPath).absolutePath();
+            if (fileDir == albumPath) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+bool ImageThumbnailModel::isFavorited(const QString& filePath) const
+{
+    // Check favorites set (separate from tags)
+    return m_favorites.contains(filePath);
+}
+
+void ImageThumbnailModel::setFavorites(const QSet<QString>& favorites)
+{
+    m_favorites = favorites;
+    // Refresh the view to update filtering (this will also update star icons via endResetModel)
+    applyFilenameFilter();
+    // After filtering, trigger dataChanged for visible items to update star icons
+    if (rowCount() > 0) {
+        QModelIndex topLeft = index(0, 0);
+        QModelIndex bottomRight = index(rowCount() - 1, 0);
+        Q_EMIT dataChanged(topLeft, bottomRight, {IsFavoritedRole});
+    }
+}
+
 // ============== Filename Filtering ==============
 
 void ImageThumbnailModel::setFilenameFilter(const QString& filter)
@@ -567,12 +640,20 @@ void ImageThumbnailModel::applyFilenameFilter()
     m_pendingThumbnails.clear();
     m_thumbDirtyRows.clear();
     
+    // Apply album file filter first (but always show favorites)
+    QList<ImageItem> filteredItems;
+    for (const ImageItem& item : m_allItems) {
+        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
+            filteredItems.append(item);
+        }
+    }
+    
     if (m_filenameFilter.isEmpty()) {
-        // No filter — show everything from m_allItems
-        m_items = m_allItems;
+        // No filename filter — show everything after album filter
+        m_items = filteredItems;
     } else {
         // Filter by filename (case-insensitive substring match)
-        for (const ImageItem& item : m_allItems) {
+        for (const ImageItem& item : filteredItems) {
             if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
                 m_items.append(item);
             }

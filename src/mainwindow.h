@@ -90,6 +90,7 @@ private:
 
     // Toolbar widgets
     QLineEdit* m_pathEdit = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
     QSlider* m_zoomSlider = nullptr;
     QLabel* m_zoomLabel = nullptr;
 

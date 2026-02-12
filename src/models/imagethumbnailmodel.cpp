@@ -243,6 +243,7 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
     
     beginResetModel();
     m_items.clear();
+    m_allItems.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
     m_thumbDirtyRows.clear();
@@ -250,7 +251,21 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
     
     scanDirectory(path, recursive);
     
+    // scanDirectory populates m_items — save the full set before filename filter
+    m_allItems = m_items;
+    
+    // Apply filename filter if one is active
+    if (!m_filenameFilter.isEmpty()) {
+        m_items.clear();
+        for (const ImageItem& item : m_allItems) {
+            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
+                m_items.append(item);
+            }
+        }
+    }
+    
     // Build path lookup
+    m_pathToRow.clear();
     for (int i = 0; i < m_items.size(); ++i) {
         m_pathToRow.insert(m_items[i].filePath, i);
     }
@@ -308,6 +323,7 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
     
     beginResetModel();
     m_items.clear();
+    m_allItems.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
     m_thumbDirtyRows.clear();
@@ -331,9 +347,24 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
         }
         
         if (matchesTagFilter(item)) {
-            m_pathToRow.insert(item.filePath, m_items.size());
-            m_items.append(item);
+            m_allItems.append(item);
         }
+    }
+    
+    // Apply filename filter
+    if (m_filenameFilter.isEmpty()) {
+        m_items = m_allItems;
+    } else {
+        for (const ImageItem& item : m_allItems) {
+            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
+                m_items.append(item);
+            }
+        }
+    }
+    
+    // Build path lookup
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
     }
     
     endResetModel();
@@ -344,6 +375,7 @@ void ImageThumbnailModel::clear()
 {
     beginResetModel();
     m_items.clear();
+    m_allItems.clear();
     m_pathToRow.clear();
     m_pendingThumbnails.clear();
     m_thumbDirtyRows.clear();
@@ -500,6 +532,47 @@ void ImageThumbnailModel::clearTagFilter()
     if (!m_currentDir.isEmpty()) {
         loadDirectory(m_currentDir);
     }
+}
+
+// ============== Filename Filtering ==============
+
+void ImageThumbnailModel::setFilenameFilter(const QString& filter)
+{
+    QString trimmed = filter.trimmed();
+    if (m_filenameFilter == trimmed) {
+        return;  // No change
+    }
+    m_filenameFilter = trimmed;
+    applyFilenameFilter();
+}
+
+void ImageThumbnailModel::applyFilenameFilter()
+{
+    beginResetModel();
+    m_items.clear();
+    m_pathToRow.clear();
+    m_pendingThumbnails.clear();
+    m_thumbDirtyRows.clear();
+    
+    if (m_filenameFilter.isEmpty()) {
+        // No filter — show everything from m_allItems
+        m_items = m_allItems;
+    } else {
+        // Filter by filename (case-insensitive substring match)
+        for (const ImageItem& item : m_allItems) {
+            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
+                m_items.append(item);
+            }
+        }
+    }
+    
+    // Rebuild path lookup
+    for (int i = 0; i < m_items.size(); ++i) {
+        m_pathToRow.insert(m_items[i].filePath, i);
+    }
+    
+    endResetModel();
+    Q_EMIT loadingFinished(m_items.size());
 }
 
 bool ImageThumbnailModel::matchesTagFilter(const ImageItem& item) const

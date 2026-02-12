@@ -379,6 +379,30 @@ void MainWindow::setupToolBar()
     )");
     layout->addWidget(m_pathEdit, 1);
 
+    // Search bar
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText("🔎 Search by filename...");
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setMinimumWidth(160);
+    m_searchEdit->setMaximumWidth(280);
+    m_searchEdit->setStyleSheet(R"(
+        QLineEdit {
+            background-color: #252525;
+            border: 1px solid #3d3d3d;
+            border-radius: 4px;
+            padding: 4px 10px;
+            color: #e0e0e0;
+            font-size: 12px;
+        }
+        QLineEdit:focus {
+            border: 1px solid #005a9e;
+        }
+    )");
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        m_model->setFilenameFilter(text);
+    });
+    layout->addWidget(m_searchEdit);
+
     // Zoom controls
     QLabel* zoomIcon = new QLabel("🔍", this);
     zoomIcon->setStyleSheet("color: #e0e0e0; font-size: 14px;");
@@ -497,6 +521,10 @@ void MainWindow::openFolder(const QString& path)
 {
     m_currentFolder = path;
     m_pathEdit->setText(path);
+    
+    // Clear the search bar when opening a new folder
+    m_searchEdit->clear();
+    
     m_model->loadDirectory(path);
     m_tagSidebar->refresh();
 }

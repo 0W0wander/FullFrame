@@ -114,6 +114,9 @@ public:
     void setTagFilter(const QSet<qint64>& tagIds, bool requireAll = false);
     void setShowUntagged(bool showUntagged);
     void clearTagFilter();
+    
+    // Filename filtering (in-memory, instant — no disk I/O)
+    void setFilenameFilter(const QString& filter);
 
 Q_SIGNALS:
     void loadingStarted();
@@ -138,9 +141,11 @@ private:
     void requestThumbnail(int row) const;
     void scanDirectory(const QString& path, bool recursive);
     bool matchesTagFilter(const ImageItem& item) const;
+    void applyFilenameFilter();
 
 private:
-    QList<ImageItem> m_items;
+    QList<ImageItem> m_items;         // Currently visible items (after all filters)
+    QList<ImageItem> m_allItems;      // All items after tag filter (before filename filter)
     QHash<QString, int> m_pathToRow;
     QString m_currentDir;
     
@@ -151,6 +156,9 @@ private:
     QSet<qint64> m_tagFilter;
     bool m_requireAllTags = false;
     bool m_showUntagged = false;
+    
+    // Filename filter (applied in-memory on top of tag filter)
+    QString m_filenameFilter;
     
     // Thumbnail update batching — reduces UI thread pressure during active loading
     QTimer* m_thumbBatchTimer = nullptr;

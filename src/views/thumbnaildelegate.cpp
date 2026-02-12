@@ -117,18 +117,19 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
     
-    // Draw favorite star icon (always show if favorited, even if no other tags)
-    if (isFavorited) {
+    // Draw rating indicator (top-right corner) - only if not favorited
+    // If favorited, the star will be shown instead
+    int ratingValue = index.data(RatingRole).toInt();
+    if (ratingValue > 0 && !isFavorited) {
         painter->setRenderHint(QPainter::Antialiasing, true);
-        paintFavoriteStar(painter, thumbRect);
+        paintRating(painter, thumbRect, ratingValue);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
     
-    // Draw rating indicator (top-right corner)
-    int ratingValue = index.data(RatingRole).toInt();
-    if (ratingValue > 0) {
+    // Draw favorite star icon (top-right corner, replaces rating dots if favorited)
+    if (isFavorited) {
         painter->setRenderHint(QPainter::Antialiasing, true);
-        paintRating(painter, thumbRect, ratingValue);
+        paintFavoriteStar(painter, thumbRect);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
@@ -277,11 +278,11 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
 
 void ThumbnailDelegate::paintFavoriteStar(QPainter* painter, const QRect& rect) const
 {
-    // Draw a small star icon in the bottom left corner
+    // Draw a small star icon in the top right corner
     int starSize = 16;
     int margin = 4;
-    int x = rect.left() + margin;
-    int y = rect.bottom() - starSize - margin;
+    int x = rect.right() - starSize - margin;
+    int y = rect.top() + margin;
     
     // Create a star shape
     QPainterPath starPath;

@@ -1096,6 +1096,9 @@ void MainWindow::toggleFavoriteSelected()
         return;
     }
     
+    // Save selected paths to restore after model update
+    QStringList pathsToRestore = selectedPaths;
+    
     // Check if all selected images are favorited
     bool allFavorited = true;
     for (const QString& path : selectedPaths) {
@@ -1127,6 +1130,33 @@ void MainWindow::toggleFavoriteSelected()
         if (m_sortMode == "ranking") {
             m_model->sortByRanking(m_favorites, m_ratings);
         }
+        
+        // Restore selection after model update completes
+        // Use a timer to ensure the model reset has finished
+        QTimer::singleShot(50, this, [this, pathsToRestore]() {
+            if (!m_gridView || !m_model) return;
+            
+            // Clear current selection first
+            m_gridView->clearSelection();
+            
+            // Restore selection by finding the indexes for the saved paths
+            QItemSelection selection;
+            for (const QString& path : pathsToRestore) {
+                QModelIndex index = m_model->indexForPath(path);
+                if (index.isValid()) {
+                    selection.select(index, index);
+                }
+            }
+            
+            // Apply the selection
+            if (m_gridView->selectionModel()) {
+                m_gridView->selectionModel()->select(selection, QItemSelectionModel::Select);
+                // Set the first selected item as current
+                if (!selection.indexes().isEmpty()) {
+                    m_gridView->setCurrentIndex(selection.indexes().first());
+                }
+            }
+        });
     }
     
     // Save favorites

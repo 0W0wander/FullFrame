@@ -962,6 +962,11 @@ void TaggingModeWidget::setupUI()
             m_sidebar->refresh();
         }
     });
+    connect(TagManager::instance(), &TagManager::tagRenamed, this, [this](qint64, const QString&) {
+        if (!m_currentImagePath.isEmpty()) {
+            m_sidebar->refresh();
+        }
+    });
 
     setStyleSheet("background-color: #1e1e1e;");
 }

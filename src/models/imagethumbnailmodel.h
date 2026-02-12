@@ -124,6 +124,7 @@ private Q_SLOTS:
     void onThumbnailFailed(const QString& filePath);
     void onImageTagged(const QString& imagePath, qint64 tagId);
     void onImageUntagged(const QString& imagePath, qint64 tagId);
+    void onTagRenamed(qint64 tagId, const QString& newName);
 
 private:
     void connectThumbnailThread();

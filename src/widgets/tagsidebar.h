@@ -47,10 +47,12 @@ Q_SIGNALS:
     void clicked(qint64 tagId);
     void hotkeyClicked(qint64 tagId);
     void deleteRequested(qint64 tagId);
+    void renameRequested(qint64 tagId);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
@@ -106,6 +108,7 @@ private Q_SLOTS:
     void onTagCardClicked(qint64 tagId);
     void onHotkeyClicked(qint64 tagId);
     void onDeleteRequested(qint64 tagId);
+    void onRenameRequested(qint64 tagId);
 
 private:
     void setupUI();

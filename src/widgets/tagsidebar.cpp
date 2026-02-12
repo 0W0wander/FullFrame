@@ -13,6 +13,9 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QInputDialog>
 #include <QApplication>
 #include <QScrollBar>
 #include <QTimer>
@@ -163,6 +166,21 @@ void TagCard::mousePressEvent(QMouseEvent* event)
         } else {
             Q_EMIT clicked(m_tagId);
         }
+    }
+}
+
+void TagCard::contextMenuEvent(QContextMenuEvent* event)
+{
+    QMenu menu(this);
+    
+    QAction* renameAction = menu.addAction("Rename");
+    QAction* deleteAction = menu.addAction("Delete");
+    
+    QAction* chosen = menu.exec(event->globalPos());
+    if (chosen == renameAction) {
+        Q_EMIT renameRequested(m_tagId);
+    } else if (chosen == deleteAction) {
+        Q_EMIT deleteRequested(m_tagId);
     }
 }
 
@@ -446,6 +464,7 @@ void TagSidebar::updateTagCards()
         connect(card, &TagCard::clicked, this, &TagSidebar::onTagCardClicked);
         connect(card, &TagCard::hotkeyClicked, this, &TagSidebar::onHotkeyClicked);
         connect(card, &TagCard::deleteRequested, this, &TagSidebar::onDeleteRequested);
+        connect(card, &TagCard::renameRequested, this, &TagSidebar::onRenameRequested);
         
         // Set selected state
         card->setSelected(m_selectedTags.contains(tag.id));
@@ -631,6 +650,37 @@ void TagSidebar::onDeleteRequested(qint64 tagId)
     if (result == QMessageBox::Yes) {
         m_selectedTags.remove(tagId);
         TagManager::instance()->deleteTag(tagId);
+    }
+}
+
+void TagSidebar::onRenameRequested(qint64 tagId)
+{
+    Tag tag = TagManager::instance()->tag(tagId);
+    if (!tag.isValid()) {
+        return;
+    }
+    
+    bool ok = false;
+    QString newName = QInputDialog::getText(this, "Rename Tag",
+        QString("New name for \"%1\":").arg(tag.name),
+        QLineEdit::Normal, tag.name, &ok);
+    
+    newName = newName.trimmed();
+    
+    if (!ok || newName.isEmpty() || newName == tag.name) {
+        return;
+    }
+    
+    // Check if a tag with the new name already exists
+    Tag existing = TagManager::instance()->tagByName(newName);
+    if (existing.isValid()) {
+        QMessageBox::warning(this, "Rename Tag",
+            QString("A tag named \"%1\" already exists.").arg(newName));
+        return;
+    }
+    
+    if (!TagManager::instance()->renameTag(tagId, newName)) {
+        QMessageBox::warning(this, "Rename Tag", "Failed to rename tag.");
     }
 }
 

@@ -50,6 +50,8 @@ void ImageThumbnailModel::connectTagManager()
             this, &ImageThumbnailModel::onImageTagged);
     connect(TagManager::instance(), &TagManager::imageUntagged,
             this, &ImageThumbnailModel::onImageUntagged);
+    connect(TagManager::instance(), &TagManager::tagRenamed,
+            this, &ImageThumbnailModel::onTagRenamed);
 }
 
 // ============== QAbstractListModel Interface ==============
@@ -575,6 +577,20 @@ void ImageThumbnailModel::onImageUntagged(const QString& imagePath, qint64 tagId
         // Emit dataChanged to update the view
         QModelIndex idx = index(row);
         Q_EMIT dataChanged(idx, idx, {TagIdsRole, HasTagsRole, TagListRole});
+    }
+}
+
+void ImageThumbnailModel::onTagRenamed(qint64 tagId, const QString& newName)
+{
+    Q_UNUSED(newName)
+    
+    // Notify the view that TagListRole changed for every item that has this tag,
+    // so the thumbnail badge text is repainted with the new name.
+    for (int row = 0; row < m_items.size(); ++row) {
+        if (m_items[row].tagIds.contains(tagId)) {
+            QModelIndex idx = index(row);
+            Q_EMIT dataChanged(idx, idx, {TagListRole});
+        }
     }
 }
 

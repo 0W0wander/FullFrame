@@ -76,6 +76,10 @@ public:
     QStringList imagesWithAnyTag(const QSet<qint64>& tagIds) const;
     QStringList imagesWithAllTags(const QSet<qint64>& tagIds) const;
     
+    // Get image count per tag (for sorting by usage)
+    // If imagePaths is provided, only counts within that set of images
+    QHash<qint64, int> tagImageCounts(const QStringList& imagePaths = QStringList()) const;
+    
     // Bulk operations
     bool tagImages(const QStringList& imagePaths, qint64 tagId);
     bool untagImages(const QStringList& imagePaths, qint64 tagId);

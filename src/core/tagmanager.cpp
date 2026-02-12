@@ -124,9 +124,11 @@ bool TagManager::createTables()
 
 qint64 TagManager::createTag(const QString& name, const QString& color, qint64 parentId)
 {
+    QString lowerName = name.toLower();
+    
     QSqlQuery query(m_db);
     query.prepare("INSERT INTO tags (name, color, parent_id) VALUES (?, ?, ?)");
-    query.addBindValue(name);
+    query.addBindValue(lowerName);
     query.addBindValue(color.isEmpty() ? QVariant() : color);
     query.addBindValue(parentId);
 
@@ -140,12 +142,12 @@ qint64 TagManager::createTag(const QString& name, const QString& color, qint64 p
     // Update cache
     Tag newTag;
     newTag.id = tagId;
-    newTag.name = name;
+    newTag.name = lowerName;
     newTag.color = color;
     newTag.parentId = parentId;
     m_tagCache.insert(tagId, newTag);
 
-    Q_EMIT tagCreated(tagId, name);
+    Q_EMIT tagCreated(tagId, lowerName);
     Q_EMIT tagsChanged();
     return tagId;
 }
@@ -168,9 +170,11 @@ bool TagManager::deleteTag(qint64 tagId)
 
 bool TagManager::renameTag(qint64 tagId, const QString& newName)
 {
+    QString lowerName = newName.toLower();
+    
     QSqlQuery query(m_db);
     query.prepare("UPDATE tags SET name = ? WHERE id = ?");
-    query.addBindValue(newName);
+    query.addBindValue(lowerName);
     query.addBindValue(tagId);
 
     if (!query.exec()) {
@@ -178,10 +182,10 @@ bool TagManager::renameTag(qint64 tagId, const QString& newName)
     }
 
     if (m_tagCache.contains(tagId)) {
-        m_tagCache[tagId].name = newName;
+        m_tagCache[tagId].name = lowerName;
     }
 
-    Q_EMIT tagRenamed(tagId, newName);
+    Q_EMIT tagRenamed(tagId, lowerName);
     Q_EMIT tagsChanged();
     return true;
 }
@@ -623,6 +627,43 @@ bool TagManager::untagImages(const QStringList& imagePaths, qint64 tagId)
     
     m_db.commit();
     return success;
+}
+
+QHash<qint64, int> TagManager::tagImageCounts(const QStringList& imagePaths) const
+{
+    QHash<qint64, int> counts;
+    QSqlQuery query(m_db);
+
+    if (imagePaths.isEmpty()) {
+        // Count across entire database
+        query.exec("SELECT tag_id, COUNT(*) FROM image_tags GROUP BY tag_id");
+    } else {
+        // Count only within the given set of image paths
+        QStringList placeholders;
+        placeholders.reserve(imagePaths.size());
+        for (int i = 0; i < imagePaths.size(); ++i) {
+            placeholders << "?";
+        }
+
+        query.prepare(QString(R"(
+            SELECT it.tag_id, COUNT(*)
+            FROM image_tags it
+            JOIN images i ON it.image_id = i.id
+            WHERE i.path IN (%1)
+            GROUP BY it.tag_id
+        )").arg(placeholders.join(",")));
+
+        for (const QString& path : imagePaths) {
+            query.addBindValue(path);
+        }
+        query.exec();
+    }
+
+    while (query.next()) {
+        counts.insert(query.value(0).toLongLong(), query.value(1).toInt());
+    }
+
+    return counts;
 }
 
 } // namespace FullFrame

@@ -98,6 +98,7 @@ Q_SIGNALS:
 
 public Q_SLOTS:
     void setSelectedImagePaths(const QStringList& paths);
+    void setCurrentDirectoryPaths(const QStringList& paths);
     void setTaggingModeActive(bool active);
 
 protected:
@@ -111,6 +112,8 @@ private Q_SLOTS:
     void onRenameRequested(qint64 tagId);
 
 private:
+    enum SortMode { SortByCount, SortAlphabetic };
+    
     void setupUI();
     void loadTags();
     void updateTagCards();
@@ -130,15 +133,18 @@ private:
     QPushButton* m_createButton;
     QPushButton* m_untaggedButton;
     QPushButton* m_taggingModeButton;
+    QPushButton* m_sortButton;
     QLabel* m_statusLabel;
     QLabel* m_selectionLabel;
     
     QList<TagCard*> m_tagCards;
     QSet<qint64> m_selectedTags;
     QStringList m_selectedImagePaths;
+    QStringList m_currentDirPaths;  // All image paths in current directory (for tag counts)
     
     qint64 m_awaitingHotkeyTagId = -1;
     bool m_showUntagged = false;
+    SortMode m_sortMode = SortByCount;
 };
 
 } // namespace FullFrame

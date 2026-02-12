@@ -91,6 +91,9 @@ public:
     // Get current directory
     QString currentDirectory() const { return m_currentDir; }
     
+    // Get all file paths (before filters, for tag counting)
+    QStringList allFilePaths() const;
+    
     // Access items
     ImageItem itemAt(int row) const;
     ImageItem itemAt(const QModelIndex& index) const;

@@ -383,6 +383,16 @@ void ImageThumbnailModel::clear()
     endResetModel();
 }
 
+QStringList ImageThumbnailModel::allFilePaths() const
+{
+    QStringList paths;
+    paths.reserve(m_allItems.size());
+    for (const ImageItem& item : m_allItems) {
+        paths.append(item.filePath);
+    }
+    return paths;
+}
+
 // ============== Item Access ==============
 
 ImageItem ImageThumbnailModel::itemAt(int row) const

@@ -19,6 +19,7 @@
 #include <QApplication>
 #include <QScrollBar>
 #include <QTimer>
+#include <algorithm>
 
 namespace FullFrame {
 
@@ -306,7 +307,10 @@ void TagSidebar::setupUI()
     
     layout->addLayout(buttonRow);
 
-    // Tag search bar
+    // Search + sort row
+    QHBoxLayout* searchRow = new QHBoxLayout();
+    searchRow->setSpacing(4);
+    
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("Search tags...");
     m_searchEdit->setClearButtonEnabled(true);
@@ -327,7 +331,41 @@ void TagSidebar::setupUI()
         }
     )");
     connect(m_searchEdit, &QLineEdit::textChanged, this, &TagSidebar::filterTagCards);
-    layout->addWidget(m_searchEdit);
+    searchRow->addWidget(m_searchEdit);
+    
+    // Sort toggle button
+    m_sortButton = new QPushButton("#", this);
+    m_sortButton->setFixedSize(26, 26);
+    m_sortButton->setToolTip("Sort by count (default)");
+    m_sortButton->setStyleSheet(R"(
+        QPushButton {
+            background-color: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 3px;
+            color: #a0a0a0;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #333333;
+            border-color: #4a4a4a;
+        }
+    )");
+    connect(m_sortButton, &QPushButton::clicked, this, [this]() {
+        if (m_sortMode == SortByCount) {
+            m_sortMode = SortAlphabetic;
+            m_sortButton->setText("A");
+            m_sortButton->setToolTip("Sort alphabetically");
+        } else {
+            m_sortMode = SortByCount;
+            m_sortButton->setText("#");
+            m_sortButton->setToolTip("Sort by count (default)");
+        }
+        updateTagCards();
+    });
+    searchRow->addWidget(m_sortButton);
+    
+    layout->addLayout(searchRow);
 
     // Scroll area for tags
     m_scrollArea = new QScrollArea(this);
@@ -476,6 +514,33 @@ void TagSidebar::updateTagCards()
     }
 
     QList<Tag> tags = TagManager::instance()->allTags();
+    QHash<qint64, int> counts = TagManager::instance()->tagImageCounts(m_currentDirPaths);
+    
+    // Sort: selected tags first, then by chosen sort mode
+    const QSet<qint64>& selected = m_selectedTags;
+    SortMode mode = m_sortMode;
+    
+    std::sort(tags.begin(), tags.end(),
+        [&selected, &counts, mode](const Tag& a, const Tag& b) {
+            // Selected tags always come first
+            bool aSelected = selected.contains(a.id);
+            bool bSelected = selected.contains(b.id);
+            if (aSelected != bSelected) {
+                return aSelected;
+            }
+            
+            if (mode == SortByCount) {
+                int countA = counts.value(a.id, 0);
+                int countB = counts.value(b.id, 0);
+                if (countA != countB) {
+                    return countA > countB;  // Higher count first
+                }
+                // Tie-break alphabetically
+                return a.name.toLower() < b.name.toLower();
+            } else {
+                return a.name.toLower() < b.name.toLower();
+            }
+        });
     
     // Remove the stretch
     QLayoutItem* stretch = m_tagLayout->takeAt(m_tagLayout->count() - 1);
@@ -536,6 +601,12 @@ void TagSidebar::setSelectedImagePaths(const QStringList& paths)
         m_selectionLabel->setText(QString("%1 selected").arg(paths.size()));
         m_selectionLabel->setStyleSheet("font-size: 9px; color: #4caf50; padding: 4px 0; font-weight: bold;");
     }
+}
+
+void TagSidebar::setCurrentDirectoryPaths(const QStringList& paths)
+{
+    m_currentDirPaths = paths;
+    updateTagCards();
 }
 
 void TagSidebar::setTaggingModeActive(bool active)
@@ -635,13 +706,8 @@ void TagSidebar::onTagCardClicked(qint64 tagId)
         m_selectedTags.insert(tagId);
     }
     
-    // Update card visual
-    for (TagCard* card : m_tagCards) {
-        if (card->tagId() == tagId) {
-            card->setSelected(m_selectedTags.contains(tagId));
-            break;
-        }
-    }
+    // Re-sort so selected tags appear at top
+    updateTagCards();
     
     // Clicking a tag card is purely for filtering the view.
     // Tag application is handled separately via hotkeys (handleHotkey → toggleTagOnSelection).

@@ -526,6 +526,7 @@ void MainWindow::openFolder(const QString& path)
     m_searchEdit->clear();
     
     m_model->loadDirectory(path);
+    m_tagSidebar->setCurrentDirectoryPaths(m_model->allFilePaths());
     m_tagSidebar->refresh();
 }
 

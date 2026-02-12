@@ -215,10 +215,17 @@ public:
     // Get current image path
     QString currentImagePath() const;
     
+    // Get current row index in the thumbnail strip
+    int currentRow() const;
+    
+    // Set a pending row to select after the next model reset (instead of first)
+    void setPendingSelectRow(int row);
+    
     // Navigation
     void selectNext();
     void selectPrevious();
     void selectFirst();
+    void selectByRow(int row);
     void selectImage(const QString& filePath);
 
 Q_SIGNALS:
@@ -256,6 +263,7 @@ private:
     
     // Current state
     QString m_currentImagePath;
+    int m_pendingSelectRow = -1;
 };
 
 } // namespace FullFrame

@@ -989,6 +989,17 @@ QString TaggingModeWidget::currentImagePath() const
     return m_currentImagePath;
 }
 
+int TaggingModeWidget::currentRow() const
+{
+    QModelIndex idx = m_thumbnailStrip->currentIndex();
+    return idx.isValid() ? idx.row() : -1;
+}
+
+void TaggingModeWidget::setPendingSelectRow(int row)
+{
+    m_pendingSelectRow = row;
+}
+
 void TaggingModeWidget::selectNext()
 {
     if (!m_model || m_model->rowCount() == 0) return;
@@ -1031,6 +1042,19 @@ void TaggingModeWidget::selectFirst()
     m_thumbnailStrip->setCurrentIndex(first);
     m_thumbnailStrip->scrollTo(first);
     onThumbnailClicked(first);
+}
+
+void TaggingModeWidget::selectByRow(int row)
+{
+    if (!m_model || m_model->rowCount() == 0) return;
+    
+    int targetRow = qMin(row, m_model->rowCount() - 1);
+    if (targetRow < 0) targetRow = 0;
+    
+    QModelIndex idx = m_model->index(targetRow);
+    m_thumbnailStrip->setCurrentIndex(idx);
+    m_thumbnailStrip->scrollTo(idx);
+    onThumbnailClicked(idx);
 }
 
 void TaggingModeWidget::selectImage(const QString& filePath)
@@ -1124,7 +1148,20 @@ void TaggingModeWidget::onModelReset()
     m_sidebar->setFilePath(QString());
     
     if (m_model && m_model->rowCount() > 0) {
-        QTimer::singleShot(100, this, &TaggingModeWidget::selectFirst);
+        if (m_pendingSelectRow >= 0) {
+            int row = m_pendingSelectRow;
+            // Don't reset m_pendingSelectRow here — this slot fires twice
+            // (once for modelReset, once for loadingFinished). Reset it in
+            // the timer callback so the second invocation still sees it.
+            QTimer::singleShot(100, this, [this, row]() {
+                m_pendingSelectRow = -1;
+                selectByRow(row);
+            });
+        } else {
+            QTimer::singleShot(100, this, &TaggingModeWidget::selectFirst);
+        }
+    } else {
+        m_pendingSelectRow = -1;
     }
     
     updateTagCompleter();

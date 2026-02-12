@@ -46,9 +46,11 @@ A fast, modern media tagging app built with C++ and Qt6. Inspired by DigiKam's e
 
 ### Windows (MSVC)
 
+**Important:** When using MSVC Qt builds, you must specify the Visual Studio generator:
+
 ```powershell
-# Configure (adjust Qt path as needed)
-cmake -B build -S . -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64"
+# Configure (adjust Qt path as needed - replace 6.10.2 with your version)
+cmake -G "Visual Studio 17 2022" -A x64 -B build -S . -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64"
 
 # Build
 cmake --build build --config Release
@@ -56,6 +58,41 @@ cmake --build build --config Release
 # Run
 .\build\Release\FullFrame.exe
 ```
+
+**Alternative:** If you have Qt built with MinGW:
+
+**Easiest method - use the configure script:**
+
+```powershell
+# Configure (auto-detects Qt version, or specify: .\configure-mingw.ps1 6.10.2)
+.\configure-mingw.ps1
+
+# Build
+cmake --build build
+
+# Run
+.\build\FullFrame.exe
+```
+
+**Manual method:**
+
+```powershell
+# Add Qt's MinGW to PATH (adjust path if your Qt MinGW is in a different location)
+$env:PATH = "C:/Qt/Tools/mingw1310_64/bin;$env:PATH"
+
+# Configure (adjust Qt path as needed - replace 6.x.x with your version)
+cmake -G "MinGW Makefiles" -B build -S . -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/mingw_64"
+
+# Build
+cmake --build build
+
+# Run
+.\build\FullFrame.exe
+```
+
+**Note:** 
+- You need to add MinGW to PATH so CMake can find the compiler DLLs. Qt's MinGW is typically at `C:/Qt/Tools/mingw1310_64/bin` (or similar version number).
+- After building, Qt DLLs are automatically deployed using `windeployqt`. If you get DLL errors, run `windeployqt build/FullFrame.exe` manually.
 
 ### Linux/macOS
 

@@ -1,4 +1,30 @@
 cmake_minimum_required(VERSION 3.16)
+
+# On Windows, help CMake find MinGW compiler if using MinGW Makefiles
+if(WIN32 AND CMAKE_GENERATOR MATCHES "MinGW Makefiles")
+    # Try to find Qt's MinGW compiler if CMAKE_C_COMPILER and CMAKE_CXX_COMPILER are not set
+    if(NOT CMAKE_C_COMPILER OR NOT CMAKE_CXX_COMPILER)
+        # Common Qt MinGW installation paths
+        set(QT_MINGW_PATHS
+            "C:/Qt/Tools/mingw1310_64"
+            "C:/Qt/Tools/mingw1120_64"
+            "C:/Qt/Tools/mingw1121_64"
+            "C:/Qt/Tools/mingw1122_64"
+            "C:/Qt/Tools/mingw1123_64"
+        )
+        
+        foreach(MINGW_PATH ${QT_MINGW_PATHS})
+            if(EXISTS "${MINGW_PATH}/bin/gcc.exe" AND EXISTS "${MINGW_PATH}/bin/mingw32-make.exe")
+                set(CMAKE_C_COMPILER "${MINGW_PATH}/bin/gcc.exe" CACHE PATH "C compiler" FORCE)
+                set(CMAKE_CXX_COMPILER "${MINGW_PATH}/bin/g++.exe" CACHE PATH "C++ compiler" FORCE)
+                set(CMAKE_MAKE_PROGRAM "${MINGW_PATH}/bin/mingw32-make.exe" CACHE PATH "Make program" FORCE)
+                message(STATUS "Found Qt MinGW compiler at: ${MINGW_PATH}")
+                break()
+            endif()
+        endforeach()
+    endif()
+endif()
+
 project(FullFrame VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -123,3 +149,26 @@ endif()
 #     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 # endif()
 
+# On Windows, automatically deploy Qt DLLs after building
+if(WIN32 AND Qt6_FOUND)
+    # Find windeployqt
+    find_program(WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt
+        PATHS
+            ${Qt6_DIR}/../../../bin
+            ${CMAKE_PREFIX_PATH}/bin
+        NO_DEFAULT_PATH
+    )
+    
+    if(WINDEPLOYQT_EXECUTABLE)
+        # Add a custom command to run windeployqt after building
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${WINDEPLOYQT_EXECUTABLE} $<TARGET_FILE:${PROJECT_NAME}>
+            COMMENT "Deploying Qt libraries..."
+        )
+        message(STATUS "windeployqt will run automatically after building")
+    else()
+        message(WARNING "windeployqt not found - Qt DLLs must be deployed manually")
+        message(WARNING "Run: windeployqt build/${PROJECT_NAME}.exe")
+    endif()
+endif()

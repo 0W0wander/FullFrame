@@ -780,7 +780,21 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 
 void MainWindow::deleteSelectedImages()
 {
-    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    QStringList selectedPaths;
+    int currentRow = 0;
+    
+    if (m_isTaggingMode) {
+        // In tagging mode, get the current image from the tagging widget
+        QString currentPath = m_taggingMode->currentImagePath();
+        if (!currentPath.isEmpty()) {
+            selectedPaths << currentPath;
+        }
+        currentRow = m_taggingMode->currentRow();
+    } else {
+        selectedPaths = m_gridView->selectedImagePaths();
+        QModelIndex currentIdx = m_gridView->currentIndex();
+        currentRow = currentIdx.isValid() ? currentIdx.row() : 0;
+    }
     
     if (selectedPaths.isEmpty()) {
         return;
@@ -823,10 +837,6 @@ void MainWindow::deleteSelectedImages()
     int successCount = 0;
     int failCount = 0;
     
-    // Remember current index to maintain position
-    QModelIndex currentIdx = m_gridView->currentIndex();
-    int currentRow = currentIdx.isValid() ? currentIdx.row() : 0;
-    
     for (const QString& path : selectedPaths) {
         QFile file(path);
         if (file.remove()) {
@@ -838,12 +848,16 @@ void MainWindow::deleteSelectedImages()
     
     // Refresh the view but maintain position
     if (!m_currentFolder.isEmpty()) {
-        int totalBefore = m_model->rowCount();
+        // Tell tagging mode to select the same row after model reset
+        if (m_isTaggingMode) {
+            m_taggingMode->setPendingSelectRow(currentRow);
+        }
+        
         openFolder(m_currentFolder);
         int totalAfter = m_model->rowCount();
         
-        // Try to maintain selection at same row or closest
-        if (totalAfter > 0) {
+        // Try to maintain selection at same row or closest (for gallery mode)
+        if (!m_isTaggingMode && totalAfter > 0) {
             int newRow = qMin(currentRow, totalAfter - 1);
             QModelIndex newIdx = m_model->index(newRow);
             m_gridView->setCurrentIndex(newIdx);

@@ -144,10 +144,9 @@ if(Qt6Multimedia_FOUND AND Qt6MultimediaWidgets_FOUND)
 endif()
 
 # Platform-specific settings
-# Temporarily disabled WIN32_EXECUTABLE for debugging
-# if(WIN32)
-#     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
-# endif()
+if(WIN32)
+    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
 
 # On Windows, automatically deploy Qt DLLs after building
 if(WIN32 AND Qt6_FOUND)

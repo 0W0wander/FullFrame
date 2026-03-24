@@ -10,6 +10,7 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <cmath>
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QShowEvent>
@@ -94,6 +95,78 @@ void HorizontalThumbnailDelegate::paint(QPainter* painter, const QStyleOptionVie
         painter->setPen(QPen(QColor(0, 120, 215), 3));
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(itemRect.adjusted(2, 2, -2, -2), 4, 4);
+    }
+
+    // Rating / favorite indicators (top-right of the thumbnail area)
+    bool isFavorited = index.data(IsFavoritedRole).toBool();
+    int ratingValue = index.data(RatingRole).toInt();
+
+    // Draw rating dots first (rightmost)
+    if (ratingValue > 0) {
+        static const QColor ratingColors[] = {
+            QColor(0, 0, 0, 0),
+            QColor(244, 67, 54),
+            QColor(255, 152, 0),
+            QColor(255, 235, 59),
+            QColor(139, 195, 74),
+            QColor(76, 175, 80)
+        };
+
+        int dotSize = 5;
+        int dotSpacing = 2;
+        int margin = 4;
+        int totalWidth = ratingValue * dotSize + (ratingValue - 1) * dotSpacing;
+        int startX = itemRect.right() - margin - totalWidth;
+        int dy = itemRect.top() + margin;
+
+        QColor dotColor = ratingColors[qBound(1, ratingValue, 5)];
+
+        QRect pillRect(startX - 2, dy - 2, totalWidth + 4, dotSize + 4);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 160));
+        painter->drawRoundedRect(pillRect, (dotSize + 4) / 2.0, (dotSize + 4) / 2.0);
+
+        painter->setBrush(dotColor);
+        for (int i = 0; i < ratingValue; ++i) {
+            int dotX = startX + i * (dotSize + dotSpacing);
+            painter->drawEllipse(dotX, dy, dotSize, dotSize);
+        }
+    }
+
+    // Draw star to the left of rating (or top-right if no rating)
+    if (isFavorited) {
+        int starSize = 12;
+        int margin = 3;
+        int sx;
+        if (ratingValue > 0) {
+            int dotSize = 5;
+            int dotSpacing = 2;
+            int rMargin = 4;
+            int totalWidth = ratingValue * dotSize + (ratingValue - 1) * dotSpacing;
+            int pillLeft = itemRect.right() - rMargin - totalWidth - 2;
+            sx = pillLeft - starSize - 2;
+        } else {
+            sx = itemRect.right() - starSize - margin;
+        }
+        int sy = itemRect.top() + margin;
+
+        QPainterPath starPath;
+        QPointF center(sx + starSize / 2.0, sy + starSize / 2.0);
+        double outerR = starSize / 2.0;
+        double innerR = outerR * 0.4;
+        for (int i = 0; i < 10; ++i) {
+            double angle = (i * M_PI) / 5.0;
+            double r = (i % 2 == 0) ? outerR : innerR;
+            double px = center.x() + r * cos(angle - M_PI / 2.0);
+            double py = center.y() + r * sin(angle - M_PI / 2.0);
+            if (i == 0) starPath.moveTo(px, py);
+            else        starPath.lineTo(px, py);
+        }
+        starPath.closeSubpath();
+
+        painter->setPen(QPen(QColor(0, 0, 0, 100), 1));
+        painter->setBrush(QColor(255, 215, 0));
+        painter->drawPath(starPath);
     }
 
     painter->restore();

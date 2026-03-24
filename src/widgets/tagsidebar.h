@@ -44,6 +44,13 @@ public:
     void setHotkey(const QString& hotkey);
     void setAwaitingHotkey(bool awaiting);
     void setAlbumTag(bool isAlbum);
+    
+    void setGroupParent(bool isGroup);
+    bool isGroupParent() const { return m_isGroupParent; }
+    void setExpanded(bool expanded);
+    bool isExpanded() const { return m_expanded; }
+    void setIndented(bool indented);
+    bool isIndented() const { return m_indented; }
 
 Q_SIGNALS:
     void clicked(qint64 tagId);
@@ -52,6 +59,8 @@ Q_SIGNALS:
     void renameRequested(qint64 tagId);
     void linkToFolderRequested(qint64 tagId);
     void unlinkFromFolderRequested(qint64 tagId);
+    void expandToggled(qint64 tagId);
+    void supertagToggleRequested(qint64 tagId);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -69,9 +78,13 @@ private:
     bool m_hovered = false;
     bool m_awaitingHotkey = false;
     bool m_isAlbumTag = false;
+    bool m_isGroupParent = false;
+    bool m_expanded = false;
+    bool m_indented = false;
     
     QRect m_hotkeyRect;
     QRect m_deleteRect;
+    QRect m_expandRect;
 };
 
 /**
@@ -120,6 +133,8 @@ private Q_SLOTS:
     void onRenameRequested(qint64 tagId);
     void onLinkToFolderRequested(qint64 tagId);
     void onUnlinkFromFolderRequested(qint64 tagId);
+    void onExpandToggled(qint64 tagId);
+    void onSupertagToggleRequested(qint64 tagId);
 
 private:
     enum SortMode { SortByCount, SortAlphabetic };
@@ -133,6 +148,7 @@ private:
     void applyTagToSelection(qint64 tagId);
     void removeTagFromSelection(qint64 tagId);
     void toggleTagOnSelection(qint64 tagId);
+    TagCard* createAndConnectCard(const Tag& tag);
 
 private:
     QScrollArea* m_scrollArea;
@@ -149,8 +165,9 @@ private:
     
     QList<TagCard*> m_tagCards;
     QSet<qint64> m_selectedTags;
+    QSet<qint64> m_expandedGroups;
     QStringList m_selectedImagePaths;
-    QStringList m_currentDirPaths;  // All image paths in current directory (for tag counts)
+    QStringList m_currentDirPaths;
     
     qint64 m_awaitingHotkeyTagId = -1;
     bool m_showUntagged = false;

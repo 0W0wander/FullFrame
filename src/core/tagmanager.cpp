@@ -779,5 +779,126 @@ QHash<qint64, int> TagManager::tagImageCounts(const QStringList& imagePaths) con
     return counts;
 }
 
+// ============== Tag Hierarchy / Combining ==============
+
+bool TagManager::setTagParent(qint64 tagId, qint64 parentId)
+{
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE tags SET parent_id = ? WHERE id = ?");
+    query.addBindValue(parentId);
+    query.addBindValue(tagId);
+
+    if (!query.exec()) {
+        qWarning() << "Failed to set tag parent:" << query.lastError().text();
+        return false;
+    }
+
+    if (m_tagCache.contains(tagId)) {
+        m_tagCache[tagId].parentId = parentId;
+    }
+
+    Q_EMIT tagsChanged();
+    return true;
+}
+
+bool TagManager::groupTagsUnderParent(const QString& parentName, const QStringList& childNames)
+{
+    QString lowerParent = parentName.trimmed().toLower();
+    if (lowerParent.isEmpty() || childNames.isEmpty()) {
+        return false;
+    }
+
+    Tag parent = tagByName(lowerParent);
+    qint64 parentId;
+    if (parent.isValid()) {
+        parentId = parent.id;
+    } else {
+        parentId = createTag(lowerParent);
+        if (parentId < 0) {
+            return false;
+        }
+    }
+
+    bool allOk = true;
+    for (const QString& childName : childNames) {
+        QString lowerChild = childName.trimmed().toLower();
+        if (lowerChild.isEmpty()) continue;
+
+        Tag child = tagByName(lowerChild);
+        if (!child.isValid()) {
+            qWarning() << "groupTagsUnderParent: child tag not found:" << lowerChild;
+            allOk = false;
+            continue;
+        }
+        if (!setTagParent(child.id, parentId)) {
+            allOk = false;
+        }
+    }
+
+    return allOk;
+}
+
+bool TagManager::mergeTags(const QString& targetName, const QStringList& sourceNames)
+{
+    QString lowerTarget = targetName.trimmed().toLower();
+    if (lowerTarget.isEmpty() || sourceNames.isEmpty()) {
+        return false;
+    }
+
+    Tag target = tagByName(lowerTarget);
+    qint64 targetId;
+    if (target.isValid()) {
+        targetId = target.id;
+    } else {
+        targetId = createTag(lowerTarget);
+        if (targetId < 0) {
+            return false;
+        }
+    }
+
+    m_db.transaction();
+
+    bool allOk = true;
+    for (const QString& srcName : sourceNames) {
+        QString lowerSrc = srcName.trimmed().toLower();
+        if (lowerSrc.isEmpty()) continue;
+
+        Tag src = tagByName(lowerSrc);
+        if (!src.isValid()) {
+            qWarning() << "mergeTags: source tag not found:" << lowerSrc;
+            allOk = false;
+            continue;
+        }
+        if (src.id == targetId) continue;
+
+        // Move image associations: ignore conflicts (image already has target tag)
+        QSqlQuery moveQuery(m_db);
+        moveQuery.prepare("UPDATE OR IGNORE image_tags SET tag_id = ? WHERE tag_id = ?");
+        moveQuery.addBindValue(targetId);
+        moveQuery.addBindValue(src.id);
+        moveQuery.exec();
+
+        // Remove any leftover rows that conflicted (duplicates)
+        QSqlQuery cleanQuery(m_db);
+        cleanQuery.prepare("DELETE FROM image_tags WHERE tag_id = ?");
+        cleanQuery.addBindValue(src.id);
+        cleanQuery.exec();
+
+        // Delete the source tag
+        QSqlQuery delQuery(m_db);
+        delQuery.prepare("DELETE FROM tags WHERE id = ?");
+        delQuery.addBindValue(src.id);
+        delQuery.exec();
+
+        m_tagCache.remove(src.id);
+    }
+
+    m_db.commit();
+
+    m_imageTagCache.clear();
+    Q_EMIT tagsChanged();
+    return allOk;
+}
+
 } // namespace FullFrame
 

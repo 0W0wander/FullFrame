@@ -95,6 +95,11 @@ public:
     // Bulk operations
     bool tagImages(const QStringList& imagePaths, qint64 tagId);
     bool untagImages(const QStringList& imagePaths, qint64 tagId);
+    
+    // Tag hierarchy / combining
+    bool setTagParent(qint64 tagId, qint64 parentId);
+    bool groupTagsUnderParent(const QString& parentName, const QStringList& childNames);
+    bool mergeTags(const QString& targetName, const QStringList& sourceNames);
 
 Q_SIGNALS:
     void tagCreated(qint64 tagId, const QString& name);

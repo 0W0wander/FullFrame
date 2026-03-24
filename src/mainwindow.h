@@ -62,6 +62,7 @@ private Q_SLOTS:
     void onTagLinkedToFolder(qint64 tagId, const QString& albumPath);
     void toggleFavoriteSelected();
     void setRatingSelected(int rating);
+    void showCombineTagsDialog();
 
 private:
     void setupUI();

@@ -65,6 +65,24 @@ void TagCard::setAlbumTag(bool isAlbum)
     update();
 }
 
+void TagCard::setGroupParent(bool isGroup)
+{
+    m_isGroupParent = isGroup;
+    update();
+}
+
+void TagCard::setExpanded(bool expanded)
+{
+    m_expanded = expanded;
+    update();
+}
+
+void TagCard::setIndented(bool indented)
+{
+    m_indented = indented;
+    update();
+}
+
 void TagCard::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
@@ -72,7 +90,8 @@ void TagCard::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    QRect r = rect().adjusted(2, 2, -2, -2);
+    int indent = m_indented ? 16 : 0;
+    QRect r = rect().adjusted(2 + indent, 2, -2, -2);
     
     // Background
     QColor bgColor = m_selected ? QColor(0, 120, 215, 50) : 
@@ -92,23 +111,56 @@ void TagCard::paintEvent(QPaintEvent* event)
         painter.drawRoundedRect(r, 4, 4);
     }
     
-    // Color dot or folder icon on left
+    int contentLeft = r.left();
+    
+    // Expand/collapse triangle for group parents
+    if (m_isGroupParent) {
+        int triSize = 8;
+        int triX = r.left() + 4;
+        int triY = r.top() + (r.height() - triSize) / 2;
+        m_expandRect = QRect(triX - 2, triY - 2, triSize + 4, triSize + 4);
+        
+        QPainterPath triPath;
+        if (m_expanded) {
+            // Down-pointing triangle
+            triPath.moveTo(triX, triY);
+            triPath.lineTo(triX + triSize, triY);
+            triPath.lineTo(triX + triSize / 2.0, triY + triSize);
+        } else {
+            // Right-pointing triangle
+            triPath.moveTo(triX, triY);
+            triPath.lineTo(triX + triSize, triY + triSize / 2.0);
+            triPath.lineTo(triX, triY + triSize);
+        }
+        triPath.closeSubpath();
+        
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(160, 160, 160));
+        painter.drawPath(triPath);
+        
+        contentLeft = r.left() + triSize + 6;
+    } else {
+        m_expandRect = QRect();
+    }
+    
+    // Color dot or folder icon
     int dotSize = 8;
     int dotY = r.top() + (r.height() - dotSize) / 2;
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_color);
     if (m_isAlbumTag) {
-        // Draw folder icon for album tags
         QFont iconFont = painter.font();
         iconFont.setPixelSize(12);
         painter.setFont(iconFont);
         painter.setPen(m_color);
-        painter.drawText(QRect(r.left() + 5, r.top(), 16, r.height()), Qt::AlignCenter, QString::fromUtf8("\xF0\x9F\x93\x81"));
+        painter.drawText(QRect(contentLeft + 3, r.top(), 16, r.height()), Qt::AlignCenter, QString::fromUtf8("\xF0\x9F\x93\x81"));
     } else {
-        painter.drawEllipse(r.left() + 8, dotY, dotSize, dotSize);
+        painter.drawEllipse(contentLeft + 6, dotY, dotSize, dotSize);
     }
     
-    // Hotkey badge (right side) - compact
+    int dotAreaWidth = 20;
+    
+    // Hotkey badge (right side)
     int badgeW = 20;
     int badgeH = 18;
     int badgeMargin = 6;
@@ -128,7 +180,6 @@ void TagCard::paintEvent(QPaintEvent* event)
         painter.setFont(font);
         painter.drawText(m_hotkeyRect, Qt::AlignCenter, "?");
     } else if (!m_hotkey.isEmpty()) {
-        // Hotkey assigned - subtle green badge
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor(76, 175, 80));
         painter.drawRoundedRect(m_hotkeyRect, 3, 3);
@@ -140,13 +191,12 @@ void TagCard::paintEvent(QPaintEvent* event)
         painter.setFont(font);
         painter.drawText(m_hotkeyRect, Qt::AlignCenter, m_hotkey.toUpper());
     } else {
-        // No hotkey - minimal dashed box
         painter.setPen(QPen(QColor(80, 80, 80), 1, Qt::DotLine));
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(m_hotkeyRect, 3, 3);
     }
     
-    // Delete button (only on hover) - compact
+    // Delete button (only on hover)
     if (m_hovered) {
         m_deleteRect = QRect(m_hotkeyRect.left() - 18, m_hotkeyRect.top(), 16, badgeH);
         painter.setPen(QColor(160, 70, 70));
@@ -158,12 +208,12 @@ void TagCard::paintEvent(QPaintEvent* event)
         m_deleteRect = QRect();
     }
     
-    // Tag name - compact
-    int textLeft = r.left() + 22;
+    // Tag name
+    int textLeft = contentLeft + dotAreaWidth;
     int textRight = m_hovered ? m_deleteRect.left() - 4 : m_hotkeyRect.left() - 4;
     QRect textRect(textLeft, r.top(), textRight - textLeft, r.height());
     
-    painter.setPen(QColor(200, 200, 200));
+    painter.setPen(m_indented ? QColor(170, 170, 170) : QColor(200, 200, 200));
     QFont font = painter.font();
     font.setPixelSize(11);
     font.setBold(false);
@@ -177,7 +227,9 @@ void TagCard::paintEvent(QPaintEvent* event)
 void TagCard::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        if (m_hotkeyRect.contains(event->pos())) {
+        if (m_isGroupParent && m_expandRect.isValid() && m_expandRect.contains(event->pos())) {
+            Q_EMIT expandToggled(m_tagId);
+        } else if (m_hotkeyRect.contains(event->pos())) {
             Q_EMIT hotkeyClicked(m_tagId);
         } else if (m_deleteRect.isValid() && m_deleteRect.contains(event->pos())) {
             Q_EMIT deleteRequested(m_tagId);
@@ -192,6 +244,8 @@ void TagCard::contextMenuEvent(QContextMenuEvent* event)
     QMenu menu(this);
     
     QAction* renameAction = menu.addAction("Rename");
+    
+    QAction* supertagAction = menu.addAction("Toggle Supertag on Selection");
     
     menu.addSeparator();
     
@@ -210,6 +264,8 @@ void TagCard::contextMenuEvent(QContextMenuEvent* event)
     QAction* chosen = menu.exec(event->globalPos());
     if (chosen == renameAction) {
         Q_EMIT renameRequested(m_tagId);
+    } else if (chosen == supertagAction) {
+        Q_EMIT supertagToggleRequested(m_tagId);
     } else if (chosen == deleteAction) {
         Q_EMIT deleteRequested(m_tagId);
     } else if (linkAction && chosen == linkAction) {
@@ -534,6 +590,25 @@ void TagSidebar::loadTags()
     updateTagCards();
 }
 
+TagCard* TagSidebar::createAndConnectCard(const Tag& tag)
+{
+    TagCard* card = new TagCard(tag, m_tagContainer);
+    connect(card, &TagCard::clicked, this, &TagSidebar::onTagCardClicked);
+    connect(card, &TagCard::hotkeyClicked, this, &TagSidebar::onHotkeyClicked);
+    connect(card, &TagCard::deleteRequested, this, &TagSidebar::onDeleteRequested);
+    connect(card, &TagCard::renameRequested, this, &TagSidebar::onRenameRequested);
+    connect(card, &TagCard::linkToFolderRequested, this, &TagSidebar::onLinkToFolderRequested);
+    connect(card, &TagCard::unlinkFromFolderRequested, this, &TagSidebar::onUnlinkFromFolderRequested);
+    connect(card, &TagCard::expandToggled, this, &TagSidebar::onExpandToggled);
+    connect(card, &TagCard::supertagToggleRequested, this, &TagSidebar::onSupertagToggleRequested);
+    
+    card->setSelected(m_selectedTags.contains(tag.id));
+    if (m_awaitingHotkeyTagId == tag.id) {
+        card->setAwaitingHotkey(true);
+    }
+    return card;
+}
+
 void TagSidebar::updateTagCards()
 {
     // Clear existing cards
@@ -547,59 +622,74 @@ void TagSidebar::updateTagCards()
         return;
     }
 
-    QList<Tag> tags = TagManager::instance()->allTags();
+    QList<Tag> allTags = TagManager::instance()->allTags();
     QHash<qint64, int> counts = TagManager::instance()->tagImageCounts(m_currentDirPaths);
     
-    // Sort: selected tags first, then by chosen sort mode
+    // Separate root tags from children
+    QList<Tag> rootTags;
+    QHash<qint64, QList<Tag>> childMap;
+    
+    for (const Tag& tag : allTags) {
+        if (tag.parentId >= 0) {
+            childMap[tag.parentId].append(tag);
+        } else {
+            rootTags.append(tag);
+        }
+    }
+    
+    // Sort root tags
     const QSet<qint64>& selected = m_selectedTags;
     SortMode mode = m_sortMode;
     
-    std::sort(tags.begin(), tags.end(),
-        [&selected, &counts, mode](const Tag& a, const Tag& b) {
-            // Selected tags always come first
-            bool aSelected = selected.contains(a.id);
-            bool bSelected = selected.contains(b.id);
-            if (aSelected != bSelected) {
-                return aSelected;
+    auto sortFunc = [&selected, &counts, mode](const Tag& a, const Tag& b) {
+        bool aSelected = selected.contains(a.id);
+        bool bSelected = selected.contains(b.id);
+        if (aSelected != bSelected) {
+            return aSelected;
+        }
+        if (mode == SortByCount) {
+            int countA = counts.value(a.id, 0);
+            int countB = counts.value(b.id, 0);
+            if (countA != countB) {
+                return countA > countB;
             }
-            
-            if (mode == SortByCount) {
-                int countA = counts.value(a.id, 0);
-                int countB = counts.value(b.id, 0);
-                if (countA != countB) {
-                    return countA > countB;  // Higher count first
-                }
-                // Tie-break alphabetically
-                return a.name.toLower() < b.name.toLower();
-            } else {
-                return a.name.toLower() < b.name.toLower();
-            }
-        });
+            return a.name.toLower() < b.name.toLower();
+        } else {
+            return a.name.toLower() < b.name.toLower();
+        }
+    };
+    
+    std::sort(rootTags.begin(), rootTags.end(), sortFunc);
+    
+    // Sort children within each group
+    for (auto it = childMap.begin(); it != childMap.end(); ++it) {
+        std::sort(it.value().begin(), it.value().end(), sortFunc);
+    }
     
     // Remove the stretch
     QLayoutItem* stretch = m_tagLayout->takeAt(m_tagLayout->count() - 1);
     delete stretch;
     
-    for (const Tag& tag : tags) {
-        TagCard* card = new TagCard(tag, m_tagContainer);
+    for (const Tag& tag : rootTags) {
+        bool hasChildren = childMap.contains(tag.id);
         
-        connect(card, &TagCard::clicked, this, &TagSidebar::onTagCardClicked);
-        connect(card, &TagCard::hotkeyClicked, this, &TagSidebar::onHotkeyClicked);
-        connect(card, &TagCard::deleteRequested, this, &TagSidebar::onDeleteRequested);
-        connect(card, &TagCard::renameRequested, this, &TagSidebar::onRenameRequested);
-        connect(card, &TagCard::linkToFolderRequested, this, &TagSidebar::onLinkToFolderRequested);
-        connect(card, &TagCard::unlinkFromFolderRequested, this, &TagSidebar::onUnlinkFromFolderRequested);
-        
-        // Set selected state
-        card->setSelected(m_selectedTags.contains(tag.id));
-        
-        // Set awaiting state
-        if (m_awaitingHotkeyTagId == tag.id) {
-            card->setAwaitingHotkey(true);
+        TagCard* card = createAndConnectCard(tag);
+        if (hasChildren) {
+            card->setGroupParent(true);
+            card->setExpanded(m_expandedGroups.contains(tag.id));
         }
-        
         m_tagLayout->addWidget(card);
         m_tagCards.append(card);
+        
+        // Add children if expanded
+        if (hasChildren && m_expandedGroups.contains(tag.id)) {
+            for (const Tag& child : childMap.value(tag.id)) {
+                TagCard* childCard = createAndConnectCard(child);
+                childCard->setIndented(true);
+                m_tagLayout->addWidget(childCard);
+                m_tagCards.append(childCard);
+            }
+        }
     }
     
     // Add stretch back
@@ -612,13 +702,105 @@ void TagSidebar::updateTagCards()
 void TagSidebar::filterTagCards(const QString& text)
 {
     QString filter = text.trimmed().toLower();
-    for (TagCard* card : m_tagCards) {
-        if (filter.isEmpty()) {
+    if (filter.isEmpty()) {
+        for (TagCard* card : m_tagCards) {
             card->setVisible(true);
-        } else {
-            card->setVisible(card->tagName().toLower().contains(filter));
+        }
+        return;
+    }
+    
+    // Build set of IDs that directly match
+    QSet<qint64> matchIds;
+    for (TagCard* card : m_tagCards) {
+        if (card->tagName().toLower().contains(filter)) {
+            matchIds.insert(card->tagId());
         }
     }
+    
+    // Build set of parent IDs whose children match (show parent when child matches)
+    // and child IDs whose parent matches (show children when parent matches)
+    QSet<qint64> visibleIds = matchIds;
+    for (TagCard* card : m_tagCards) {
+        qint64 id = card->tagId();
+        if (matchIds.contains(id)) {
+            // If this is a group parent, show its children too
+            if (card->isGroupParent()) {
+                for (TagCard* other : m_tagCards) {
+                    if (other->isIndented()) {
+                        // Find child cards that come after this parent
+                        // They share the same parent in the tag manager
+                        Tag otherTag = TagManager::instance()->tag(other->tagId());
+                        if (otherTag.parentId == id) {
+                            visibleIds.insert(other->tagId());
+                        }
+                    }
+                }
+            }
+            // If this is a child, show its parent too
+            if (card->isIndented()) {
+                Tag t = TagManager::instance()->tag(id);
+                if (t.parentId >= 0) {
+                    visibleIds.insert(t.parentId);
+                }
+            }
+        }
+    }
+    
+    for (TagCard* card : m_tagCards) {
+        card->setVisible(visibleIds.contains(card->tagId()));
+    }
+}
+
+void TagSidebar::onExpandToggled(qint64 tagId)
+{
+    if (m_expandedGroups.contains(tagId)) {
+        m_expandedGroups.remove(tagId);
+    } else {
+        m_expandedGroups.insert(tagId);
+    }
+    updateTagCards();
+}
+
+void TagSidebar::onSupertagToggleRequested(qint64 tagId)
+{
+    if (m_selectedImagePaths.isEmpty()) {
+        m_statusLabel->setStyleSheet(
+            "font-size: 9px; color: #ff9800; padding: 4px 6px; "
+            "background-color: rgba(255, 152, 0, 0.15); border-radius: 3px;");
+        m_statusLabel->setText("Select images first to toggle supertag");
+        m_statusLabel->show();
+        QTimer::singleShot(2000, this, [this]() {
+            if (m_awaitingHotkeyTagId < 0) m_statusLabel->hide();
+        });
+        return;
+    }
+    
+    Tag tag = TagManager::instance()->tag(tagId);
+    if (!tag.isValid()) return;
+    
+    // Check if all selected images already have this as a supertag
+    bool allSupertag = true;
+    for (const QString& path : m_selectedImagePaths) {
+        if (!TagManager::instance()->isSupertag(path, tagId)) {
+            allSupertag = false;
+            break;
+        }
+    }
+    
+    for (const QString& path : m_selectedImagePaths) {
+        TagManager::instance()->setSupertag(path, tagId, !allSupertag);
+    }
+    
+    QString action = allSupertag ? "Removed supertag" : "Set supertag";
+    m_statusLabel->setStyleSheet(
+        "font-size: 9px; color: #9c27b0; padding: 4px 6px; "
+        "background-color: rgba(156, 39, 176, 0.15); border-radius: 3px;");
+    m_statusLabel->setText(QString("%1 \"%2\" on %3 image(s)")
+        .arg(action).arg(tag.name).arg(m_selectedImagePaths.size()));
+    m_statusLabel->show();
+    QTimer::singleShot(2000, this, [this]() {
+        if (m_awaitingHotkeyTagId < 0) m_statusLabel->hide();
+    });
 }
 
 QSet<qint64> TagSidebar::selectedTagIds() const
@@ -745,9 +927,16 @@ void TagSidebar::onTagCardClicked(qint64 tagId)
     // Re-sort so selected tags appear at top
     updateTagCards();
     
-    // Clicking a tag card is purely for filtering the view.
-    // Tag application is handled separately via hotkeys (handleHotkey → toggleTagOnSelection).
-    Q_EMIT tagFilterChanged(m_selectedTags);
+    // Build expanded filter set: include children of any selected group parents
+    QSet<qint64> expandedFilter = m_selectedTags;
+    for (qint64 id : m_selectedTags) {
+        QList<Tag> children = TagManager::instance()->childTags(id);
+        for (const Tag& child : children) {
+            expandedFilter.insert(child.id);
+        }
+    }
+    
+    Q_EMIT tagFilterChanged(expandedFilter);
 }
 
 void TagSidebar::onHotkeyClicked(qint64 tagId)

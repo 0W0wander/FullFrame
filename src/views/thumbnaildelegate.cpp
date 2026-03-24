@@ -117,19 +117,18 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         }
     }
     
-    // Draw rating indicator (top-right corner) - only if not favorited
-    // If favorited, the star will be shown instead
+    // Draw rating dots (top-right corner)
     int ratingValue = index.data(RatingRole).toInt();
-    if (ratingValue > 0 && !isFavorited) {
+    if (ratingValue > 0) {
         painter->setRenderHint(QPainter::Antialiasing, true);
         paintRating(painter, thumbRect, ratingValue);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
     
-    // Draw favorite star icon (top-right corner, replaces rating dots if favorited)
+    // Draw favorite star (to the left of rating dots, or top-right if no rating)
     if (isFavorited) {
         painter->setRenderHint(QPainter::Antialiasing, true);
-        paintFavoriteStar(painter, thumbRect);
+        paintFavoriteStar(painter, thumbRect, ratingValue);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
@@ -308,38 +307,43 @@ void ThumbnailDelegate::paintTagBadges(QPainter* painter, const QRect& rect,
     }
 }
 
-void ThumbnailDelegate::paintFavoriteStar(QPainter* painter, const QRect& rect) const
+void ThumbnailDelegate::paintFavoriteStar(QPainter* painter, const QRect& rect, int ratingValue) const
 {
-    // Draw a small star icon in the top right corner
     int starSize = 16;
     int margin = 4;
-    int x = rect.right() - starSize - margin;
+
+    // Position: if there's a rating, place star to the left of the rating pill
+    int x;
+    if (ratingValue > 0) {
+        int dotSize = 6;
+        int dotSpacing = 3;
+        int ratingMargin = 5;
+        int totalDotsWidth = ratingValue * dotSize + (ratingValue - 1) * dotSpacing;
+        int pillLeft = rect.right() - ratingMargin - totalDotsWidth - 3;
+        x = pillLeft - starSize - 2;
+    } else {
+        x = rect.right() - starSize - margin;
+    }
     int y = rect.top() + margin;
     
-    // Create a star shape
     QPainterPath starPath;
     QPointF center(x + starSize / 2.0, y + starSize / 2.0);
     double outerRadius = starSize / 2.0;
     double innerRadius = outerRadius * 0.4;
-    int points = 5;
     
-    for (int i = 0; i < points * 2; ++i) {
-        double angle = (i * M_PI) / points;
+    for (int i = 0; i < 10; ++i) {
+        double angle = (i * M_PI) / 5.0;
         double radius = (i % 2 == 0) ? outerRadius : innerRadius;
         double px = center.x() + radius * cos(angle - M_PI / 2.0);
         double py = center.y() + radius * sin(angle - M_PI / 2.0);
         
-        if (i == 0) {
-            starPath.moveTo(px, py);
-        } else {
-            starPath.lineTo(px, py);
-        }
+        if (i == 0) starPath.moveTo(px, py);
+        else        starPath.lineTo(px, py);
     }
     starPath.closeSubpath();
     
-    // Draw star with yellow/gold color and slight shadow
     painter->setPen(QPen(QColor(0, 0, 0, 100), 1));
-    painter->setBrush(QColor(255, 215, 0)); // Gold color
+    painter->setBrush(QColor(255, 215, 0));
     painter->drawPath(starPath);
 }
 

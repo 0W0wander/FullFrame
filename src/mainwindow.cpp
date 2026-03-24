@@ -35,6 +35,10 @@
 #include <QFile>
 #include <QCheckBox>
 #include <QInputDialog>
+#include <QDialog>
+#include <QPlainTextEdit>
+#include <QClipboard>
+#include <QProcess>
 
 namespace FullFrame {
 
@@ -112,31 +116,6 @@ void MainWindow::initializeDatabase()
         QMessageBox::warning(this, "Database Error",
             "Failed to initialize tag database. Tagging will be disabled.");
         return;
-    }
-    
-    // Create default tags with pre-assigned hotkeys if none exist
-    QList<Tag> existingTags = TagManager::instance()->allTags();
-    
-    if (existingTags.isEmpty()) {
-        qint64 id1 = TagManager::instance()->createTag("Keep", "#4caf50");
-        if (id1 >= 0) {
-            TagManager::instance()->setTagHotkey(id1, "1");
-        }
-        
-        qint64 id2 = TagManager::instance()->createTag("Delete", "#f44336");
-        if (id2 >= 0) {
-            TagManager::instance()->setTagHotkey(id2, "2");
-        }
-        
-        qint64 id3 = TagManager::instance()->createTag("Review", "#ff9800");
-        if (id3 >= 0) {
-            TagManager::instance()->setTagHotkey(id3, "3");
-        }
-        
-        qint64 id4 = TagManager::instance()->createTag("Favorite", "#e91e63");
-        if (id4 >= 0) {
-            TagManager::instance()->setTagHotkey(id4, "F");
-        }
     }
 }
 
@@ -350,6 +329,9 @@ void MainWindow::setupMenuBar()
     connect(m_ratingHotkeysAction, &QAction::toggled, this, [this](bool checked) {
         m_ratingHotkeysEnabled = checked;
     });
+    
+    QAction* combineTagsAction = prefsMenu->addAction("&Combine Tags...");
+    connect(combineTagsAction, &QAction::triggered, this, &MainWindow::showCombineTagsDialog);
     
     prefsMenu->addSeparator();
     
@@ -815,8 +797,8 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
 
         QAction* openFolderAction = menu.addAction("Show in Explorer");
         connect(openFolderAction, &QAction::triggered, this, [filePath]() {
-            QFileInfo info(filePath);
-            QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
+            QString nativePath = QDir::toNativeSeparators(filePath);
+            QProcess::startDetached("explorer.exe", {"/select,", nativePath});
         });
 
         menu.addSeparator();
@@ -1107,7 +1089,15 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 
 void MainWindow::toggleFavoriteSelected()
 {
-    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    QStringList selectedPaths;
+    if (m_isTaggingMode) {
+        QString currentPath = m_taggingMode->currentImagePath();
+        if (!currentPath.isEmpty()) {
+            selectedPaths << currentPath;
+        }
+    } else {
+        selectedPaths = m_gridView->selectedImagePaths();
+    }
     if (selectedPaths.isEmpty()) {
         return;
     }
@@ -1181,7 +1171,15 @@ void MainWindow::toggleFavoriteSelected()
 
 void MainWindow::setRatingSelected(int rating)
 {
-    QStringList selectedPaths = m_gridView->selectedImagePaths();
+    QStringList selectedPaths;
+    if (m_isTaggingMode) {
+        QString currentPath = m_taggingMode->currentImagePath();
+        if (!currentPath.isEmpty()) {
+            selectedPaths << currentPath;
+        }
+    } else {
+        selectedPaths = m_gridView->selectedImagePaths();
+    }
     if (selectedPaths.isEmpty()) {
         return;
     }
@@ -1717,6 +1715,192 @@ void MainWindow::reapplySort()
         m_model->sortByTag();
     }
     // Default sort is already applied by the model
+}
+
+void MainWindow::showCombineTagsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Combine Tags");
+    dialog.resize(560, 520);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setSpacing(8);
+
+    auto* helpContainer = new QWidget;
+    helpContainer->setStyleSheet("background: #2a2a2a; border-radius: 4px;");
+    auto* helpContainerLayout = new QVBoxLayout(helpContainer);
+    helpContainerLayout->setContentsMargins(6, 6, 6, 6);
+    helpContainerLayout->setSpacing(0);
+
+    auto* helpLabel = new QLabel(
+        "<b>Syntax</b> (one operation per line, <code>#</code> lines are comments):<br>"
+        "<code>GROUP ParentTag: child1, child2, child3</code> &mdash; nest children under a parent<br>"
+        "<code>MERGE NewTag: old1, old2, old3</code> &mdash; replace old tags with new tag (old deleted)"
+    );
+    helpLabel->setWordWrap(true);
+    helpLabel->setStyleSheet("color: #ccc; background: transparent;");
+    helpContainerLayout->addWidget(helpLabel);
+
+    auto* copyHelpBtn = new QPushButton("📋 Copy tags + syntax");
+    copyHelpBtn->setFixedHeight(24);
+    copyHelpBtn->setToolTip("Copy all your tags and syntax reference to clipboard");
+    copyHelpBtn->setStyleSheet(
+        "QPushButton { background: #3a3a3a; border: 1px solid #555; border-radius: 3px; "
+        "font-size: 11px; color: #bbb; padding: 0 8px; } "
+        "QPushButton:hover { background: #4a4a4a; color: #eee; }"
+    );
+    connect(copyHelpBtn, &QPushButton::clicked, [copyHelpBtn]() {
+        QList<Tag> allTags = TagManager::instance()->allTags();
+        QString text;
+        text += "# Syntax (one operation per line, # lines are comments):\n";
+        text += "# GROUP ParentTag: child1, child2, child3   -- nest children under parent\n";
+        text += "# MERGE NewTag: old1, old2, old3             -- replace old tags with new tag\n";
+        text += "#\n# All tags:\n";
+        for (const Tag& t : allTags) {
+            text += "# " + t.name + "\n";
+        }
+        QApplication::clipboard()->setText(text);
+        copyHelpBtn->setText("✓ Copied!");
+        QTimer::singleShot(1500, [copyHelpBtn]() { copyHelpBtn->setText("📋 Copy tags + syntax"); });
+    });
+    helpContainerLayout->addWidget(copyHelpBtn);
+    layout->addWidget(helpContainer);
+
+    auto* inputEdit = new QPlainTextEdit;
+    inputEdit->setPlaceholderText(
+        "# Example:\n"
+        "GROUP Landscape: mountains, sunset, ocean\n"
+        "MERGE feline: kitty, cat, kitten"
+    );
+    inputEdit->setStyleSheet(
+        "QPlainTextEdit { background: #1e1e1e; color: #ddd; border: 1px solid #444; "
+        "border-radius: 4px; padding: 4px; font-family: Consolas, monospace; font-size: 12px; }"
+    );
+    layout->addWidget(inputEdit, 3);
+
+    auto* logLabel = new QLabel("Results:");
+    logLabel->setStyleSheet("color: #888; font-size: 11px;");
+    layout->addWidget(logLabel);
+
+    auto* logEdit = new QPlainTextEdit;
+    logEdit->setReadOnly(true);
+    logEdit->setStyleSheet(
+        "QPlainTextEdit { background: #1a1a1a; color: #aaa; border: 1px solid #333; "
+        "border-radius: 4px; padding: 4px; font-family: Consolas, monospace; font-size: 11px; }"
+    );
+    layout->addWidget(logEdit, 2);
+
+    auto* buttonLayout = new QHBoxLayout;
+    buttonLayout->addStretch();
+
+    auto* executeBtn = new QPushButton("Execute");
+    executeBtn->setStyleSheet(
+        "QPushButton { background: #0078d7; color: white; border: none; border-radius: 4px; "
+        "padding: 6px 20px; font-weight: bold; } "
+        "QPushButton:hover { background: #1a8ae8; }"
+    );
+
+    auto* closeBtn = new QPushButton("Close");
+    closeBtn->setStyleSheet(
+        "QPushButton { background: #444; color: #ccc; border: none; border-radius: 4px; "
+        "padding: 6px 20px; } "
+        "QPushButton:hover { background: #555; }"
+    );
+
+    buttonLayout->addWidget(executeBtn);
+    buttonLayout->addWidget(closeBtn);
+    layout->addLayout(buttonLayout);
+
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    connect(executeBtn, &QPushButton::clicked, [&]() {
+        logEdit->clear();
+        QString text = inputEdit->toPlainText();
+        QStringList lines = text.split('\n');
+        int groupCount = 0, mergeCount = 0, errorCount = 0;
+
+        for (int lineNum = 0; lineNum < lines.size(); ++lineNum) {
+            QString line = lines[lineNum].trimmed();
+            if (line.isEmpty() || line.startsWith('#')) continue;
+
+            int colonIdx = line.indexOf(':');
+            if (colonIdx < 0) {
+                logEdit->appendPlainText(
+                    QString("Line %1: ERROR - no ':' separator found").arg(lineNum + 1));
+                errorCount++;
+                continue;
+            }
+
+            QString left = line.left(colonIdx).trimmed();
+            QString right = line.mid(colonIdx + 1).trimmed();
+
+            if (right.isEmpty()) {
+                logEdit->appendPlainText(
+                    QString("Line %1: ERROR - no tag names after ':'").arg(lineNum + 1));
+                errorCount++;
+                continue;
+            }
+
+            QStringList tagNames;
+            for (const QString& s : right.split(',')) {
+                QString t = s.trimmed();
+                if (!t.isEmpty()) tagNames << t;
+            }
+            if (tagNames.isEmpty()) {
+                logEdit->appendPlainText(
+                    QString("Line %1: ERROR - no valid tag names").arg(lineNum + 1));
+                errorCount++;
+                continue;
+            }
+
+            QString keyword;
+            QString targetTag;
+            int spaceIdx = left.indexOf(' ');
+            if (spaceIdx > 0) {
+                keyword = left.left(spaceIdx).toUpper();
+                targetTag = left.mid(spaceIdx + 1).trimmed();
+            }
+
+            if (keyword != "GROUP" && keyword != "MERGE") {
+                logEdit->appendPlainText(
+                    QString("Line %1: ERROR - expected GROUP or MERGE, got \"%2\"")
+                        .arg(lineNum + 1).arg(left));
+                errorCount++;
+                continue;
+            }
+
+            if (targetTag.isEmpty()) {
+                logEdit->appendPlainText(
+                    QString("Line %1: ERROR - missing target tag name").arg(lineNum + 1));
+                errorCount++;
+                continue;
+            }
+
+            auto* mgr = TagManager::instance();
+            if (keyword == "GROUP") {
+                bool ok = mgr->groupTagsUnderParent(targetTag, tagNames);
+                logEdit->appendPlainText(
+                    QString("Line %1: GROUP \"%2\" <- [%3] ... %4")
+                        .arg(lineNum + 1).arg(targetTag)
+                        .arg(tagNames.join(", "))
+                        .arg(ok ? "OK" : "PARTIAL (some tags not found)"));
+                groupCount++;
+            } else {
+                bool ok = mgr->mergeTags(targetTag, tagNames);
+                logEdit->appendPlainText(
+                    QString("Line %1: MERGE \"%2\" <- [%3] ... %4")
+                        .arg(lineNum + 1).arg(targetTag)
+                        .arg(tagNames.join(", "))
+                        .arg(ok ? "OK" : "PARTIAL (some tags not found)"));
+                mergeCount++;
+            }
+        }
+
+        logEdit->appendPlainText(QString("\nDone: %1 group(s), %2 merge(s), %3 error(s)")
+            .arg(groupCount).arg(mergeCount).arg(errorCount));
+    });
+
+    dialog.exec();
 }
 
 } // namespace FullFrame

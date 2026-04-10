@@ -83,6 +83,12 @@ void TagCard::setIndented(bool indented)
     update();
 }
 
+void TagCard::setCount(int count)
+{
+    m_count = count;
+    update();
+}
+
 void TagCard::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event)
@@ -208,20 +214,35 @@ void TagCard::paintEvent(QPaintEvent* event)
         m_deleteRect = QRect();
     }
     
-    // Tag name
+    // Tag name (with optional count)
     int textLeft = contentLeft + dotAreaWidth;
     int textRight = m_hovered ? m_deleteRect.left() - 4 : m_hotkeyRect.left() - 4;
     QRect textRect(textLeft, r.top(), textRight - textLeft, r.height());
     
-    painter.setPen(m_indented ? QColor(170, 170, 170) : QColor(200, 200, 200));
     QFont font = painter.font();
     font.setPixelSize(11);
     font.setBold(false);
     painter.setFont(font);
-    
     QFontMetrics fm(font);
-    QString elidedText = fm.elidedText(m_name, Qt::ElideRight, textRect.width());
-    painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, elidedText);
+    
+    if (m_count >= 0) {
+        QString countStr = QString(" (%1)").arg(m_count);
+        int countWidth = fm.horizontalAdvance(countStr);
+        int nameAvail = textRect.width() - countWidth;
+        QString elidedName = fm.elidedText(m_name, Qt::ElideRight, qMax(nameAvail, 20));
+        
+        painter.setPen(m_indented ? QColor(170, 170, 170) : QColor(200, 200, 200));
+        painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, elidedName);
+        
+        int nameDrawn = fm.horizontalAdvance(elidedName);
+        QRect countRect(textLeft + nameDrawn, r.top(), countWidth, r.height());
+        painter.setPen(QColor(120, 120, 120));
+        painter.drawText(countRect, Qt::AlignVCenter | Qt::AlignLeft, countStr);
+    } else {
+        QString elidedText = fm.elidedText(m_name, Qt::ElideRight, textRect.width());
+        painter.setPen(m_indented ? QColor(170, 170, 170) : QColor(200, 200, 200));
+        painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, elidedText);
+    }
 }
 
 void TagCard::mousePressEvent(QMouseEvent* event)
@@ -397,10 +418,7 @@ void TagSidebar::setupUI()
     
     layout->addLayout(buttonRow);
 
-    // Search + sort row
-    QHBoxLayout* searchRow = new QHBoxLayout();
-    searchRow->setSpacing(4);
-    
+    // Search row
     m_searchEdit = new QLineEdit(this);
     m_searchEdit->setPlaceholderText("Search tags...");
     m_searchEdit->setClearButtonEnabled(true);
@@ -421,48 +439,9 @@ void TagSidebar::setupUI()
         }
     )");
     connect(m_searchEdit, &QLineEdit::textChanged, this, &TagSidebar::filterTagCards);
-    searchRow->addWidget(m_searchEdit);
-    
-    // Sort toggle button
-    m_sortButton = new QPushButton("#", this);
-    m_sortButton->setFixedSize(26, 26);
-    m_sortButton->setToolTip("Sort by count (default)");
-    m_sortButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: #2a2a2a;
-            border: 1px solid #3a3a3a;
-            border-radius: 3px;
-            color: #a0a0a0;
-            font-size: 11px;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #333333;
-            border-color: #4a4a4a;
-        }
-    )");
-    connect(m_sortButton, &QPushButton::clicked, this, [this]() {
-        if (m_sortMode == SortByCount) {
-            m_sortMode = SortAlphabetic;
-            m_sortButton->setText("A");
-            m_sortButton->setToolTip("Sort alphabetically");
-        } else {
-            m_sortMode = SortByCount;
-            m_sortButton->setText("#");
-            m_sortButton->setToolTip("Sort by count (default)");
-        }
-        updateTagCards();
-    });
-    searchRow->addWidget(m_sortButton);
-    
-    layout->addLayout(searchRow);
+    layout->addWidget(m_searchEdit);
 
-    // Scroll area for tags
-    m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_scrollArea->setStyleSheet(R"(
+    QString scrollAreaStyle = R"(
         QScrollArea {
             background-color: transparent;
             border: none;
@@ -476,7 +455,7 @@ void TagSidebar::setupUI()
         QScrollBar::handle:vertical {
             background: #505050;
             border-radius: 4px;
-            min-height: 30px;
+            min-height: 20px;
         }
         QScrollBar::handle:vertical:hover {
             background: #606060;
@@ -484,17 +463,58 @@ void TagSidebar::setupUI()
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             height: 0;
         }
-    )");
-    
-    m_tagContainer = new QWidget();
-    m_tagContainer->setStyleSheet("background-color: transparent;");
-    m_tagLayout = new QVBoxLayout(m_tagContainer);
-    m_tagLayout->setContentsMargins(0, 0, 0, 0);
-    m_tagLayout->setSpacing(2);
-    m_tagLayout->addStretch();
-    
-    m_scrollArea->setWidget(m_tagContainer);
-    layout->addWidget(m_scrollArea, 1);
+    )";
+
+    QString sectionLabelStyle = "font-size: 9px; font-weight: bold; color: #606060; "
+                                "letter-spacing: 1px; padding: 2px 0;";
+
+    // === RECENT section ===
+    QLabel* recentLabel = new QLabel("RECENT", this);
+    recentLabel->setStyleSheet(sectionLabelStyle);
+    layout->addWidget(recentLabel);
+
+    m_recentScrollArea = new QScrollArea(this);
+    m_recentScrollArea->setWidgetResizable(true);
+    m_recentScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_recentScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_recentScrollArea->setStyleSheet(scrollAreaStyle);
+
+    m_recentContainer = new QWidget();
+    m_recentContainer->setStyleSheet("background-color: transparent;");
+    m_recentLayout = new QVBoxLayout(m_recentContainer);
+    m_recentLayout->setContentsMargins(0, 0, 0, 0);
+    m_recentLayout->setSpacing(2);
+    m_recentLayout->addStretch();
+
+    m_recentScrollArea->setWidget(m_recentContainer);
+    layout->addWidget(m_recentScrollArea, 1);
+
+    // === Divider ===
+    QFrame* sectionDivider = new QFrame(this);
+    sectionDivider->setFrameShape(QFrame::HLine);
+    sectionDivider->setStyleSheet("background-color: #333; max-height: 1px;");
+    layout->addWidget(sectionDivider);
+
+    // === POPULAR section ===
+    QLabel* popularLabel = new QLabel("POPULAR", this);
+    popularLabel->setStyleSheet(sectionLabelStyle);
+    layout->addWidget(popularLabel);
+
+    m_popularScrollArea = new QScrollArea(this);
+    m_popularScrollArea->setWidgetResizable(true);
+    m_popularScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_popularScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_popularScrollArea->setStyleSheet(scrollAreaStyle);
+
+    m_popularContainer = new QWidget();
+    m_popularContainer->setStyleSheet("background-color: transparent;");
+    m_popularLayout = new QVBoxLayout(m_popularContainer);
+    m_popularLayout->setContentsMargins(0, 0, 0, 0);
+    m_popularLayout->setSpacing(2);
+    m_popularLayout->addStretch();
+
+    m_popularScrollArea->setWidget(m_popularContainer);
+    layout->addWidget(m_popularScrollArea, 1);
 
     // Status label for hotkey assignment
     m_statusLabel = new QLabel("", this);
@@ -590,9 +610,9 @@ void TagSidebar::loadTags()
     updateTagCards();
 }
 
-TagCard* TagSidebar::createAndConnectCard(const Tag& tag)
+TagCard* TagSidebar::createAndConnectCard(const Tag& tag, QWidget* parent)
 {
-    TagCard* card = new TagCard(tag, m_tagContainer);
+    TagCard* card = new TagCard(tag, parent);
     connect(card, &TagCard::clicked, this, &TagSidebar::onTagCardClicked);
     connect(card, &TagCard::hotkeyClicked, this, &TagSidebar::onHotkeyClicked);
     connect(card, &TagCard::deleteRequested, this, &TagSidebar::onDeleteRequested);
@@ -609,21 +629,67 @@ TagCard* TagSidebar::createAndConnectCard(const Tag& tag)
     return card;
 }
 
+void TagSidebar::populateSection(QVBoxLayout* layout, const QList<Tag>& rootTags,
+                                 const QHash<qint64, QList<Tag>>& childMap,
+                                 const QHash<qint64, int>& counts)
+{
+    QWidget* container = qobject_cast<QWidget*>(layout->parentWidget());
+    bool showCounts = !counts.isEmpty();
+    
+    for (const Tag& tag : rootTags) {
+        bool hasChildren = childMap.contains(tag.id);
+        
+        TagCard* card = createAndConnectCard(tag, container);
+        if (hasChildren) {
+            card->setGroupParent(true);
+            card->setExpanded(m_expandedGroups.contains(tag.id));
+        }
+        if (showCounts)
+            card->setCount(counts.value(tag.id, 0));
+        layout->addWidget(card);
+        m_tagCards.append(card);
+        
+        if (hasChildren && m_expandedGroups.contains(tag.id)) {
+            for (const Tag& child : childMap.value(tag.id)) {
+                TagCard* childCard = createAndConnectCard(child, container);
+                childCard->setIndented(true);
+                if (showCounts)
+                    childCard->setCount(counts.value(child.id, 0));
+                layout->addWidget(childCard);
+                m_tagCards.append(childCard);
+            }
+        }
+    }
+}
+
 void TagSidebar::updateTagCards()
 {
-    // Clear existing cards
+    // Clear all existing cards from both sections
     for (TagCard* card : m_tagCards) {
-        m_tagLayout->removeWidget(card);
         card->deleteLater();
     }
     m_tagCards.clear();
     
+    // Clear recent layout
+    while (m_recentLayout->count() > 0) {
+        QLayoutItem* item = m_recentLayout->takeAt(0);
+        delete item;
+    }
+    // Clear popular layout
+    while (m_popularLayout->count() > 0) {
+        QLayoutItem* item = m_popularLayout->takeAt(0);
+        delete item;
+    }
+    
     if (!TagManager::instance()->isInitialized()) {
+        m_recentLayout->addStretch();
+        m_popularLayout->addStretch();
         return;
     }
 
     QList<Tag> allTags = TagManager::instance()->allTags();
     QHash<qint64, int> counts = TagManager::instance()->tagImageCounts(m_currentDirPaths);
+    QHash<qint64, QDateTime> lastUsed = TagManager::instance()->tagLastUsedTimes();
     
     // Separate root tags from children
     QList<Tag> rootTags;
@@ -637,64 +703,51 @@ void TagSidebar::updateTagCards()
         }
     }
     
-    // Sort root tags
     const QSet<qint64>& selected = m_selectedTags;
-    SortMode mode = m_sortMode;
-    
-    auto sortFunc = [&selected, &counts, mode](const Tag& a, const Tag& b) {
+
+    // --- Recent section: sort by most recently used, then by name ---
+    QList<Tag> recentRoots = rootTags;
+    auto recentSort = [&selected, &lastUsed](const Tag& a, const Tag& b) {
         bool aSelected = selected.contains(a.id);
         bool bSelected = selected.contains(b.id);
-        if (aSelected != bSelected) {
-            return aSelected;
-        }
-        if (mode == SortByCount) {
-            int countA = counts.value(a.id, 0);
-            int countB = counts.value(b.id, 0);
-            if (countA != countB) {
-                return countA > countB;
-            }
-            return a.name.toLower() < b.name.toLower();
-        } else {
-            return a.name.toLower() < b.name.toLower();
-        }
+        if (aSelected != bSelected) return aSelected;
+        QDateTime ta = lastUsed.value(a.id);
+        QDateTime tb = lastUsed.value(b.id);
+        if (ta.isValid() != tb.isValid()) return ta.isValid();
+        if (ta.isValid() && ta != tb) return ta > tb;
+        return a.name.toLower() < b.name.toLower();
     };
+    std::sort(recentRoots.begin(), recentRoots.end(), recentSort);
     
-    std::sort(rootTags.begin(), rootTags.end(), sortFunc);
-    
-    // Sort children within each group
-    for (auto it = childMap.begin(); it != childMap.end(); ++it) {
-        std::sort(it.value().begin(), it.value().end(), sortFunc);
+    QHash<qint64, QList<Tag>> recentChildMap = childMap;
+    for (auto it = recentChildMap.begin(); it != recentChildMap.end(); ++it) {
+        std::sort(it.value().begin(), it.value().end(), recentSort);
     }
     
-    // Remove the stretch
-    QLayoutItem* stretch = m_tagLayout->takeAt(m_tagLayout->count() - 1);
-    delete stretch;
+    populateSection(m_recentLayout, recentRoots, recentChildMap);
+    m_recentLayout->addStretch();
+
+    // --- Popular section: sort by image count desc, then by name ---
+    QList<Tag> popularRoots = rootTags;
+    auto popularSort = [&selected, &counts](const Tag& a, const Tag& b) {
+        bool aSelected = selected.contains(a.id);
+        bool bSelected = selected.contains(b.id);
+        if (aSelected != bSelected) return aSelected;
+        int ca = counts.value(a.id, 0);
+        int cb = counts.value(b.id, 0);
+        if (ca != cb) return ca > cb;
+        return a.name.toLower() < b.name.toLower();
+    };
+    std::sort(popularRoots.begin(), popularRoots.end(), popularSort);
     
-    for (const Tag& tag : rootTags) {
-        bool hasChildren = childMap.contains(tag.id);
-        
-        TagCard* card = createAndConnectCard(tag);
-        if (hasChildren) {
-            card->setGroupParent(true);
-            card->setExpanded(m_expandedGroups.contains(tag.id));
-        }
-        m_tagLayout->addWidget(card);
-        m_tagCards.append(card);
-        
-        // Add children if expanded
-        if (hasChildren && m_expandedGroups.contains(tag.id)) {
-            for (const Tag& child : childMap.value(tag.id)) {
-                TagCard* childCard = createAndConnectCard(child);
-                childCard->setIndented(true);
-                m_tagLayout->addWidget(childCard);
-                m_tagCards.append(childCard);
-            }
-        }
+    QHash<qint64, QList<Tag>> popularChildMap = childMap;
+    for (auto it = popularChildMap.begin(); it != popularChildMap.end(); ++it) {
+        std::sort(it.value().begin(), it.value().end(), popularSort);
     }
     
-    // Add stretch back
-    m_tagLayout->addStretch();
-    
+    populateSection(m_popularLayout, popularRoots, popularChildMap, counts);
+    m_popularLayout->addStretch();
+
     // Re-apply search filter
     filterTagCards(m_searchEdit->text());
 }
@@ -960,7 +1013,6 @@ void TagSidebar::onHotkeyClicked(qint64 tagId)
     for (TagCard* card : m_tagCards) {
         if (card->tagId() == tagId) {
             card->setAwaitingHotkey(true);
-            break;
         }
     }
     
@@ -1036,7 +1088,6 @@ void TagSidebar::clearAwaitingHotkey()
         for (TagCard* card : m_tagCards) {
             if (card->tagId() == m_awaitingHotkeyTagId) {
                 card->setAwaitingHotkey(false);
-                break;
             }
         }
         m_awaitingHotkeyTagId = -1;

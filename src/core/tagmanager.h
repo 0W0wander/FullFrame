@@ -15,6 +15,7 @@
 #include <QStringList>
 #include <QSet>
 #include <QHash>
+#include <QDateTime>
 #include <QSqlDatabase>
 
 namespace FullFrame {
@@ -91,6 +92,9 @@ public:
     // Get image count per tag (for sorting by usage)
     // If imagePaths is provided, only counts within that set of images
     QHash<qint64, int> tagImageCounts(const QStringList& imagePaths = QStringList()) const;
+    
+    // Get the most recent tagged_at timestamp for each tag
+    QHash<qint64, QDateTime> tagLastUsedTimes() const;
     
     // Bulk operations
     bool tagImages(const QStringList& imagePaths, qint64 tagId);

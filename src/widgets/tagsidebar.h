@@ -51,6 +51,9 @@ public:
     bool isExpanded() const { return m_expanded; }
     void setIndented(bool indented);
     bool isIndented() const { return m_indented; }
+    
+    void setCount(int count);
+    int count() const { return m_count; }
 
 Q_SIGNALS:
     void clicked(qint64 tagId);
@@ -81,6 +84,7 @@ private:
     bool m_isGroupParent = false;
     bool m_expanded = false;
     bool m_indented = false;
+    int m_count = -1;
     
     QRect m_hotkeyRect;
     QRect m_deleteRect;
@@ -137,29 +141,36 @@ private Q_SLOTS:
     void onSupertagToggleRequested(qint64 tagId);
 
 private:
-    enum SortMode { SortByCount, SortAlphabetic };
-    
     void setupUI();
     void loadTags();
     void updateTagCards();
+    void populateSection(QVBoxLayout* layout, const QList<Tag>& rootTags,
+                         const QHash<qint64, QList<Tag>>& childMap,
+                         const QHash<qint64, int>& counts = QHash<qint64, int>());
     void filterTagCards(const QString& text);
     void clearAwaitingHotkey();
     QColor generateTagColor() const;
     void applyTagToSelection(qint64 tagId);
     void removeTagFromSelection(qint64 tagId);
     void toggleTagOnSelection(qint64 tagId);
-    TagCard* createAndConnectCard(const Tag& tag);
+    TagCard* createAndConnectCard(const Tag& tag, QWidget* parent);
 
 private:
-    QScrollArea* m_scrollArea;
-    QWidget* m_tagContainer;
-    QVBoxLayout* m_tagLayout;
+    // Recent section
+    QScrollArea* m_recentScrollArea;
+    QWidget* m_recentContainer;
+    QVBoxLayout* m_recentLayout;
+    
+    // Popular section
+    QScrollArea* m_popularScrollArea;
+    QWidget* m_popularContainer;
+    QVBoxLayout* m_popularLayout;
+    
     QLineEdit* m_searchEdit;
     QLineEdit* m_newTagEdit;
     QPushButton* m_createButton;
     QPushButton* m_untaggedButton;
     QPushButton* m_taggingModeButton;
-    QPushButton* m_sortButton;
     QLabel* m_statusLabel;
     QLabel* m_selectionLabel;
     
@@ -171,7 +182,6 @@ private:
     
     qint64 m_awaitingHotkeyTagId = -1;
     bool m_showUntagged = false;
-    SortMode m_sortMode = SortByCount;
 };
 
 } // namespace FullFrame

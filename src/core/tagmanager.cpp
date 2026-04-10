@@ -779,6 +779,18 @@ QHash<qint64, int> TagManager::tagImageCounts(const QStringList& imagePaths) con
     return counts;
 }
 
+QHash<qint64, QDateTime> TagManager::tagLastUsedTimes() const
+{
+    QHash<qint64, QDateTime> times;
+    QSqlQuery query(m_db);
+    query.exec("SELECT tag_id, MAX(tagged_at) FROM image_tags GROUP BY tag_id");
+    while (query.next()) {
+        times.insert(query.value(0).toLongLong(),
+                     query.value(1).toDateTime());
+    }
+    return times;
+}
+
 // ============== Tag Hierarchy / Combining ==============
 
 bool TagManager::setTagParent(qint64 tagId, qint64 parentId)

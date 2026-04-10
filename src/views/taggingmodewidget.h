@@ -213,8 +213,11 @@ public:
 
     void setModel(ImageThumbnailModel* model);
     
-    // Get current image path
+    // Get current image path (the one shown in preview)
     QString currentImagePath() const;
+    
+    // Get all selected image paths in the thumbnail strip
+    QStringList selectedImagePaths() const;
     
     // Get current row index in the thumbnail strip
     int currentRow() const;
@@ -231,6 +234,7 @@ public:
 
 Q_SIGNALS:
     void imageSelected(const QString& filePath);
+    void selectionChanged(const QStringList& paths);
     void openRequested(const QString& filePath);
     void contextMenuRequested(const QPoint& globalPos, const QString& filePath);
 
@@ -246,6 +250,7 @@ protected:
 private Q_SLOTS:
     void onThumbnailClicked(const QModelIndex& index);
     void onCurrentChanged(const QModelIndex& current, const QModelIndex& previous);
+    void onStripSelectionChanged();
     void onModelReset();
     void onTagAdded(const QString& tagName);
     void updateTagCompleter();

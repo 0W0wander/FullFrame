@@ -190,10 +190,9 @@ void MainWindow::setupUI()
             });
     
     // Tagging mode connections
-    connect(m_taggingMode, &TaggingModeWidget::imageSelected,
-            this, [this](const QString& path) {
-                // Update sidebar with single image selection
-                m_tagSidebar->setSelectedImagePaths(QStringList() << path);
+    connect(m_taggingMode, &TaggingModeWidget::selectionChanged,
+            this, [this](const QStringList& paths) {
+                m_tagSidebar->setSelectedImagePaths(paths);
             });
     connect(m_taggingMode, &TaggingModeWidget::openRequested,
             this, &MainWindow::onImageActivated);
@@ -880,12 +879,12 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
         bool hasAlbumTags = false;
         QStringList selectedPaths;
         if (m_isTaggingMode) {
-            selectedPaths << filePath;
+            selectedPaths = m_taggingMode->selectedImagePaths();
         } else {
             selectedPaths = m_gridView->selectedImagePaths();
-            if (selectedPaths.isEmpty()) {
-                selectedPaths << filePath;
-            }
+        }
+        if (selectedPaths.isEmpty()) {
+            selectedPaths << filePath;
         }
         for (const Tag& tag : allTags) {
             if (tag.isAlbumTag()) {
@@ -1279,11 +1278,7 @@ void MainWindow::deleteSelectedImages()
     int currentRow = 0;
     
     if (m_isTaggingMode) {
-        // In tagging mode, get the current image from the tagging widget
-        QString currentPath = m_taggingMode->currentImagePath();
-        if (!currentPath.isEmpty()) {
-            selectedPaths << currentPath;
-        }
+        selectedPaths = m_taggingMode->selectedImagePaths();
         currentRow = m_taggingMode->currentRow();
     } else {
         selectedPaths = m_gridView->selectedImagePaths();

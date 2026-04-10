@@ -1058,7 +1058,7 @@ void TaggingModeWidget::setupUI()
     m_thumbnailStrip->setWrapping(false);
     m_thumbnailStrip->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     m_thumbnailStrip->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_thumbnailStrip->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_thumbnailStrip->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_thumbnailStrip->setFixedHeight(140);
     m_thumbnailStrip->setMouseTracking(false);
     m_thumbnailStrip->setUniformItemSizes(true);
@@ -1098,7 +1098,13 @@ void TaggingModeWidget::setupUI()
         }
     )");
     
-    connect(m_thumbnailStrip, &QListView::clicked, this, &TaggingModeWidget::onThumbnailClicked);
+    connect(m_thumbnailStrip, &QListView::clicked, this, [this](const QModelIndex& index) {
+        if (!index.isValid()) return;
+        Qt::KeyboardModifiers mods = QApplication::keyboardModifiers();
+        if (!(mods & (Qt::ControlModifier | Qt::ShiftModifier))) {
+            onThumbnailClicked(index);
+        }
+    });
     
     mainLayout->addWidget(m_thumbnailStrip);
 
@@ -1160,6 +1166,8 @@ void TaggingModeWidget::setModel(ImageThumbnailModel* model)
         if (m_thumbnailStrip->selectionModel()) {
             connect(m_thumbnailStrip->selectionModel(), &QItemSelectionModel::currentChanged,
                     this, &TaggingModeWidget::onCurrentChanged);
+            connect(m_thumbnailStrip->selectionModel(), &QItemSelectionModel::selectionChanged,
+                    this, &TaggingModeWidget::onStripSelectionChanged);
         }
     }
     
@@ -1194,7 +1202,8 @@ void TaggingModeWidget::selectNext()
     }
     
     QModelIndex next = m_model->index(nextRow);
-    m_thumbnailStrip->setCurrentIndex(next);
+    m_thumbnailStrip->selectionModel()->setCurrentIndex(next,
+        QItemSelectionModel::ClearAndSelect);
     m_thumbnailStrip->scrollTo(next);
     onThumbnailClicked(next);
 }
@@ -1211,7 +1220,8 @@ void TaggingModeWidget::selectPrevious()
     }
     
     QModelIndex prev = m_model->index(prevRow);
-    m_thumbnailStrip->setCurrentIndex(prev);
+    m_thumbnailStrip->selectionModel()->setCurrentIndex(prev,
+        QItemSelectionModel::ClearAndSelect);
     m_thumbnailStrip->scrollTo(prev);
     onThumbnailClicked(prev);
 }
@@ -1221,7 +1231,8 @@ void TaggingModeWidget::selectFirst()
     if (!m_model || m_model->rowCount() == 0) return;
     
     QModelIndex first = m_model->index(0);
-    m_thumbnailStrip->setCurrentIndex(first);
+    m_thumbnailStrip->selectionModel()->setCurrentIndex(first,
+        QItemSelectionModel::ClearAndSelect);
     m_thumbnailStrip->scrollTo(first);
     onThumbnailClicked(first);
 }
@@ -1234,7 +1245,8 @@ void TaggingModeWidget::selectByRow(int row)
     if (targetRow < 0) targetRow = 0;
     
     QModelIndex idx = m_model->index(targetRow);
-    m_thumbnailStrip->setCurrentIndex(idx);
+    m_thumbnailStrip->selectionModel()->setCurrentIndex(idx,
+        QItemSelectionModel::ClearAndSelect);
     m_thumbnailStrip->scrollTo(idx);
     onThumbnailClicked(idx);
 }
@@ -1247,7 +1259,8 @@ void TaggingModeWidget::selectImage(const QString& filePath)
         QModelIndex index = m_model->index(i);
         QString path = index.data(FilePathRole).toString();
         if (path == filePath) {
-            m_thumbnailStrip->setCurrentIndex(index);
+            m_thumbnailStrip->selectionModel()->setCurrentIndex(index,
+                QItemSelectionModel::ClearAndSelect);
             m_thumbnailStrip->scrollTo(index);
             onThumbnailClicked(index);
             break;
@@ -1323,9 +1336,43 @@ void TaggingModeWidget::onThumbnailClicked(const QModelIndex& index)
 void TaggingModeWidget::onCurrentChanged(const QModelIndex& current, const QModelIndex& previous)
 {
     Q_UNUSED(previous)
-    if (current.isValid()) {
-        onThumbnailClicked(current);
+    if (!current.isValid()) return;
+
+    Qt::KeyboardModifiers mods = QApplication::keyboardModifiers();
+    if (mods & (Qt::ControlModifier | Qt::ShiftModifier))
+        return;
+
+    onThumbnailClicked(current);
+}
+
+void TaggingModeWidget::onStripSelectionChanged()
+{
+    QStringList paths;
+    const QModelIndexList indexes = m_thumbnailStrip->selectionModel()->selectedIndexes();
+    paths.reserve(indexes.size());
+    for (const QModelIndex& idx : indexes) {
+        QString p = idx.data(FilePathRole).toString();
+        if (!p.isEmpty())
+            paths.append(p);
     }
+    if (paths.isEmpty() && !m_currentImagePath.isEmpty())
+        paths.append(m_currentImagePath);
+    Q_EMIT selectionChanged(paths);
+}
+
+QStringList TaggingModeWidget::selectedImagePaths() const
+{
+    QStringList paths;
+    const QModelIndexList indexes = m_thumbnailStrip->selectionModel()->selectedIndexes();
+    paths.reserve(indexes.size());
+    for (const QModelIndex& idx : indexes) {
+        QString p = idx.data(FilePathRole).toString();
+        if (!p.isEmpty())
+            paths.append(p);
+    }
+    if (paths.isEmpty() && !m_currentImagePath.isEmpty())
+        paths.append(m_currentImagePath);
+    return paths;
 }
 
 void TaggingModeWidget::onModelReset()
@@ -1359,7 +1406,8 @@ void TaggingModeWidget::onModelReset()
                 for (int i = 0; i < m_model->rowCount(); ++i) {
                     QModelIndex idx = m_model->index(i);
                     if (idx.data(FilePathRole).toString() == savedPath) {
-                        m_thumbnailStrip->setCurrentIndex(idx);
+                        m_thumbnailStrip->selectionModel()->setCurrentIndex(idx,
+                            QItemSelectionModel::ClearAndSelect);
                         m_thumbnailStrip->scrollTo(idx);
                         onThumbnailClicked(idx);
                         return;

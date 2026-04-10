@@ -895,14 +895,24 @@ void TagSidebar::onCreateTag()
         return;
     }
 
-    // Generate random color
-    QColor color = generateTagColor();
-    
-    qint64 tagId = TagManager::instance()->createTag(name, color.name());
-    if (tagId >= 0) {
-        m_newTagEdit->clear();
-    } else {
+    // Re-use existing tag if one with this name already exists
+    Tag existing = TagManager::instance()->tagByName(name);
+    qint64 tagId = existing.isValid() ? existing.id : -1;
+
+    if (tagId < 0) {
+        QColor color = generateTagColor();
+        tagId = TagManager::instance()->createTag(name, color.name());
+    }
+
+    if (tagId < 0) {
         QMessageBox::warning(this, "Error", "Failed to create tag. Name may already exist.");
+        return;
+    }
+
+    m_newTagEdit->clear();
+
+    if (!m_selectedImagePaths.isEmpty()) {
+        applyTagToSelection(tagId);
     }
 }
 

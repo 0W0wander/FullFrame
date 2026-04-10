@@ -197,6 +197,8 @@ void MainWindow::setupUI()
             });
     connect(m_taggingMode, &TaggingModeWidget::openRequested,
             this, &MainWindow::onImageActivated);
+    connect(m_taggingMode, &TaggingModeWidget::contextMenuRequested,
+            this, &MainWindow::onContextMenu);
     
     // Sidebar tagging mode button
     connect(m_tagSidebar, &TagSidebar::taggingModeRequested,
@@ -803,6 +805,51 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
 
         menu.addSeparator();
 
+        QAction* renameAction = menu.addAction("Rename...");
+        connect(renameAction, &QAction::triggered, this, [this, filePath]() {
+            QFileInfo fi(filePath);
+            QString oldName = fi.fileName();
+            bool ok = false;
+            QString newName = QInputDialog::getText(this, "Rename File",
+                "New filename:", QLineEdit::Normal, oldName, &ok);
+            if (!ok || newName.isEmpty() || newName == oldName)
+                return;
+
+            QString newPath = fi.dir().filePath(newName);
+            if (QFile::exists(newPath)) {
+                QMessageBox::warning(this, "Rename Failed",
+                    QString("A file named \"%1\" already exists in this folder.").arg(newName));
+                return;
+            }
+
+            if (!QFile::rename(filePath, newPath)) {
+                QMessageBox::warning(this, "Rename Failed",
+                    QString("Could not rename \"%1\".").arg(oldName));
+                return;
+            }
+
+            TagManager::instance()->updateImagePath(filePath, newPath);
+
+            if (m_favorites.contains(filePath)) {
+                m_favorites.remove(filePath);
+                m_favorites.insert(newPath);
+            }
+            if (m_ratings.contains(filePath)) {
+                int r = m_ratings.take(filePath);
+                m_ratings.insert(newPath, r);
+            }
+
+            int row = m_isTaggingMode ? m_taggingMode->currentRow() : 0;
+            if (m_isTaggingMode) {
+                m_taggingMode->setPendingSelectRow(row);
+            }
+            if (!m_currentFolder.isEmpty()) {
+                openFolder(m_currentFolder);
+            }
+        });
+
+        menu.addSeparator();
+
         // Tag submenu
         QMenu* tagMenu = menu.addMenu("Add Tag");
         QList<Tag> tags = TagManager::instance()->allTags();
@@ -831,9 +878,14 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
         QList<Tag> allTags = TagManager::instance()->allTags();
         QMenu* moveToAlbumMenu = menu.addMenu(QString::fromUtf8("\xF0\x9F\x93\x81 Move to Album"));
         bool hasAlbumTags = false;
-        QStringList selectedPaths = m_gridView->selectedImagePaths();
-        if (selectedPaths.isEmpty()) {
+        QStringList selectedPaths;
+        if (m_isTaggingMode) {
             selectedPaths << filePath;
+        } else {
+            selectedPaths = m_gridView->selectedImagePaths();
+            if (selectedPaths.isEmpty()) {
+                selectedPaths << filePath;
+            }
         }
         for (const Tag& tag : allTags) {
             if (tag.isAlbumTag()) {

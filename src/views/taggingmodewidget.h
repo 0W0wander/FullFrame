@@ -232,6 +232,7 @@ public:
 Q_SIGNALS:
     void imageSelected(const QString& filePath);
     void openRequested(const QString& filePath);
+    void contextMenuRequested(const QPoint& globalPos, const QString& filePath);
 
 public Q_SLOTS:
     void refresh();
@@ -240,6 +241,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void showEvent(QShowEvent* event) override;
     bool eventFilter(QObject* obj, QEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private Q_SLOTS:
     void onThumbnailClicked(const QModelIndex& index);

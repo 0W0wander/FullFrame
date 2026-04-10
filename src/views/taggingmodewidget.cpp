@@ -14,6 +14,7 @@
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QShowEvent>
+#include <QContextMenuEvent>
 #include <QImageReader>
 #include <QDesktopServices>
 #include <QUrl>
@@ -1300,6 +1301,11 @@ void TaggingModeWidget::showEvent(QShowEvent* event)
 bool TaggingModeWidget::eventFilter(QObject* obj, QEvent* event)
 {
     return QWidget::eventFilter(obj, event);
+}
+
+void TaggingModeWidget::contextMenuEvent(QContextMenuEvent* event)
+{
+    Q_EMIT contextMenuRequested(event->globalPos(), m_currentImagePath);
 }
 
 void TaggingModeWidget::onThumbnailClicked(const QModelIndex& index)

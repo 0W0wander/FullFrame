@@ -68,6 +68,8 @@ void ImageThumbnailModel::connectTagManager()
             this, &ImageThumbnailModel::onImageUntagged);
     connect(TagManager::instance(), &TagManager::tagRenamed,
             this, &ImageThumbnailModel::onTagRenamed);
+    connect(TagManager::instance(), &TagManager::sequencesChanged,
+            this, &ImageThumbnailModel::refreshSequenceData);
 }
 
 // ============== QAbstractListModel Interface ==============
@@ -184,7 +186,18 @@ QVariant ImageThumbnailModel::data(const QModelIndex& index, int role) const
             
         case RatingRole:
             return m_ratings.value(item.filePath, 0);
-            
+
+        case IsSequenceCoverRole:
+            return m_sequenceCovers.contains(item.filePath);
+
+        case SequenceCountRole:
+            return m_sequenceCovers.value(item.filePath, 0);
+
+        case IsSequenceExpandedRole: {
+            qint64 seqId = m_pathToSequenceId.value(item.filePath, -1);
+            return seqId >= 0 && m_expandedSequences.contains(seqId);
+        }
+
         case Qt::ToolTipRole:
             return QString("%1\n%2\n%3")
                 .arg(item.fileName)
@@ -248,46 +261,21 @@ void ImageThumbnailModel::loadDirectory(const QString& path, bool recursive)
     Q_EMIT loadingStarted();
     
     beginResetModel();
-    m_items.clear();
     m_allItems.clear();
-    m_pathToRow.clear();
     m_pendingThumbnails.clear();
-    m_thumbDirtyRows.clear();
     m_currentDir = path;
+    m_expandedSequences.clear();
     
     scanDirectory(path, recursive);
     
-    // scanDirectory now populates m_allItems with all items (after tag filter)
-    // and m_items with items after album file filter. We need to apply
-    // album file filter to m_allItems to get m_items, then apply filename filter.
+    // Refresh sequence data before filtering
+    m_sequenceCovers = TagManager::instance()->allSequenceCovers();
+    m_hiddenSequenceMembers = TagManager::instance()->hiddenSequenceMembers();
+    m_pathToSequenceId = TagManager::instance()->allImageSequenceIds();
     
-    // Apply album file filter (but always show favorites)
-    m_items.clear();
-    for (const ImageItem& item : m_allItems) {
-        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
-            m_items.append(item);
-        }
-    }
-    
-    // Apply filename filter if one is active
-    if (!m_filenameFilter.isEmpty()) {
-        QList<ImageItem> filenameFiltered;
-        for (const ImageItem& item : m_items) {
-            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
-                filenameFiltered.append(item);
-            }
-        }
-        m_items = filenameFiltered;
-    }
-    
-    // Build path lookup
-    m_pathToRow.clear();
-    for (int i = 0; i < m_items.size(); ++i) {
-        m_pathToRow.insert(m_items[i].filePath, i);
-    }
+    rebuildFilteredItems();
     
     endResetModel();
-    
     Q_EMIT loadingFinished(m_items.size());
 }
 
@@ -373,29 +361,7 @@ void ImageThumbnailModel::loadFiles(const QStringList& filePaths)
         }
     }
     
-    // Apply album file filter (but always show favorites)
-    QList<ImageItem> filteredItems;
-    for (const ImageItem& item : m_allItems) {
-        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
-            filteredItems.append(item);
-        }
-    }
-    
-    // Apply filename filter
-    if (m_filenameFilter.isEmpty()) {
-        m_items = filteredItems;
-    } else {
-        for (const ImageItem& item : filteredItems) {
-            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
-                m_items.append(item);
-            }
-        }
-    }
-    
-    // Build path lookup
-    for (int i = 0; i < m_items.size(); ++i) {
-        m_pathToRow.insert(m_items[i].filePath, i);
-    }
+    rebuildFilteredItems();
     
     endResetModel();
     Q_EMIT loadingFinished(m_items.size());
@@ -585,6 +551,27 @@ void ImageThumbnailModel::setShowAlbumFiles(bool show)
     applyFilenameFilter();  // Reapply filters
 }
 
+void ImageThumbnailModel::refreshSequenceData()
+{
+    m_sequenceCovers = TagManager::instance()->allSequenceCovers();
+    m_hiddenSequenceMembers = TagManager::instance()->hiddenSequenceMembers();
+    m_pathToSequenceId = TagManager::instance()->allImageSequenceIds();
+    applyFilenameFilter();
+}
+
+void ImageThumbnailModel::toggleSequenceExpanded(const QString& coverPath)
+{
+    qint64 seqId = m_pathToSequenceId.value(coverPath, -1);
+    if (seqId < 0) return;
+
+    if (m_expandedSequences.contains(seqId))
+        m_expandedSequences.remove(seqId);
+    else
+        m_expandedSequences.insert(seqId);
+
+    applyFilenameFilter();
+}
+
 bool ImageThumbnailModel::isInAlbumFolder(const QString& filePath) const
 {
     if (!TagManager::instance()->isInitialized()) {
@@ -672,39 +659,58 @@ void ImageThumbnailModel::setFilenameFilter(const QString& filter)
     applyFilenameFilter();
 }
 
-void ImageThumbnailModel::applyFilenameFilter()
+void ImageThumbnailModel::rebuildFilteredItems()
 {
-    beginResetModel();
     m_items.clear();
     m_pathToRow.clear();
-    m_pendingThumbnails.clear();
     m_thumbDirtyRows.clear();
-    
-    // Apply album file filter first (but always show favorites)
-    QList<ImageItem> filteredItems;
+
+    // Collect expanded-sequence members separately so we can insert them after covers
+    QHash<qint64, QList<ImageItem>> expandedMembers;
+    QList<ImageItem> baseItems;
+
     for (const ImageItem& item : m_allItems) {
-        if (m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)) {
-            filteredItems.append(item);
+        // Album filter
+        if (!(m_showAlbumFiles || !isInAlbumFolder(item.filePath) || isFavorited(item.filePath)))
+            continue;
+        // Filename filter
+        if (!m_filenameFilter.isEmpty()
+            && !item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive))
+            continue;
+
+        if (m_hiddenSequenceMembers.contains(item.filePath)) {
+            qint64 seqId = m_pathToSequenceId.value(item.filePath, -1);
+            if (seqId >= 0 && m_expandedSequences.contains(seqId)) {
+                expandedMembers[seqId].append(item);
+                continue;
+            }
+            // Not expanded — skip this hidden member
+            continue;
         }
+        baseItems.append(item);
     }
-    
-    if (m_filenameFilter.isEmpty()) {
-        // No filename filter — show everything after album filter
-        m_items = filteredItems;
-    } else {
-        // Filter by filename (case-insensitive substring match)
-        for (const ImageItem& item : filteredItems) {
-            if (item.fileName.contains(m_filenameFilter, Qt::CaseInsensitive)) {
-                m_items.append(item);
+
+    // Build m_items, inserting expanded members right after their cover
+    for (const ImageItem& item : baseItems) {
+        m_items.append(item);
+        if (m_sequenceCovers.contains(item.filePath)) {
+            qint64 seqId = m_pathToSequenceId.value(item.filePath, -1);
+            if (seqId >= 0 && expandedMembers.contains(seqId)) {
+                m_items.append(expandedMembers[seqId]);
             }
         }
     }
-    
-    // Rebuild path lookup
+
     for (int i = 0; i < m_items.size(); ++i) {
         m_pathToRow.insert(m_items[i].filePath, i);
     }
-    
+}
+
+void ImageThumbnailModel::applyFilenameFilter()
+{
+    beginResetModel();
+    m_pendingThumbnails.clear();
+    rebuildFilteredItems();
     endResetModel();
     Q_EMIT loadingFinished(m_items.size());
 }

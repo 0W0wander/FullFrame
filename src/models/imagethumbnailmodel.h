@@ -65,7 +65,10 @@ enum ImageRole
     TagListRole,      // Returns QVariantList of tag info (name, color)
     MediaTypeRole,   // Returns MediaType enum value
     IsFavoritedRole,  // Returns bool indicating if item is favorited
-    RatingRole        // Returns int 0-5 (0 = unrated)
+    RatingRole,       // Returns int 0-5 (0 = unrated)
+    IsSequenceCoverRole,  // Returns bool: this image is a sequence cover
+    SequenceCountRole,    // Returns int: number of images in the sequence (0 if not a cover)
+    IsSequenceExpandedRole // Returns bool: this sequence cover is currently expanded inline
 };
 
 /**
@@ -141,6 +144,10 @@ public:
     void sortByCreationDate();
     void sortByTag();
     void sortDefault();
+    
+    // Sequences
+    void refreshSequenceData();
+    void toggleSequenceExpanded(const QString& coverPath);
 
 Q_SIGNALS:
     void loadingStarted();
@@ -165,6 +172,7 @@ private:
     void requestThumbnail(int row) const;
     void scanDirectory(const QString& path, bool recursive);
     bool matchesTagFilter(const ImageItem& item) const;
+    void rebuildFilteredItems();
     void applyFilenameFilter();
     bool isInAlbumFolder(const QString& filePath) const;
     bool isFavorited(const QString& filePath) const;
@@ -194,6 +202,12 @@ private:
     
     // Rating system (separate from tags, 1-5, 0 = unrated)
     QHash<QString, int> m_ratings;
+    
+    // Sequence data
+    QHash<QString, int> m_sequenceCovers;       // cover path → member count
+    QSet<QString> m_hiddenSequenceMembers;       // non-cover paths
+    QHash<QString, qint64> m_pathToSequenceId;   // any member path → seqId
+    QSet<qint64> m_expandedSequences;            // currently expanded sequences
     
     // Thumbnail update batching — reduces UI thread pressure during active loading
     QTimer* m_thumbBatchTimer = nullptr;

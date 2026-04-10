@@ -68,8 +68,15 @@ public:
                const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option,
                    const QModelIndex& index) const override;
+    bool editorEvent(QEvent* event, QAbstractItemModel* model,
+                     const QStyleOptionViewItem& option,
+                     const QModelIndex& index) override;
+
+Q_SIGNALS:
+    void sequenceToggleRequested(const QString& coverPath);
 
 private:
+    QRect sequenceBadgeRect(const QRect& itemRect) const;
     int m_thumbnailHeight = 120;
 };
 

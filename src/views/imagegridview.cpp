@@ -126,6 +126,9 @@ void ImageGridView::setImageModel(ImageThumbnailModel* model)
     setModel(model);
 
     if (m_model) {
+        connect(m_delegate, &ThumbnailDelegate::sequenceToggleRequested,
+                m_model, &ImageThumbnailModel::toggleSequenceExpanded);
+
         connect(m_model, &ImageThumbnailModel::loadingFinished,
                 this, [this](int count) {
                     Q_UNUSED(count)

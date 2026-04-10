@@ -45,9 +45,13 @@ public:
                const QModelIndex& index) const override;
     QSize sizeHint(const QStyleOptionViewItem& option,
                    const QModelIndex& index) const override;
+    bool editorEvent(QEvent* event, QAbstractItemModel* model,
+                     const QStyleOptionViewItem& option,
+                     const QModelIndex& index) override;
 
 Q_SIGNALS:
     void sizeHintChanged();
+    void sequenceToggleRequested(const QString& coverPath);
 
 private:
     void paintThumbnail(QPainter* painter, const QRect& rect,
@@ -62,7 +66,10 @@ private:
                         const QVariantList& tags) const;
     void paintFavoriteStar(QPainter* painter, const QRect& rect, int ratingValue = 0) const;
     void paintRating(QPainter* painter, const QRect& rect, int rating) const;
+    void paintSequenceBadge(QPainter* painter, const QRect& rect,
+                            int count, bool expanded) const;
     void paintHoverEffect(QPainter* painter, const QRect& rect) const;
+    QRect sequenceBadgeRect(const QRect& thumbRect) const;
 
 private:
     int m_thumbnailSize = 256;

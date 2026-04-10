@@ -38,7 +38,11 @@
 #include <QDialog>
 #include <QPlainTextEdit>
 #include <QClipboard>
-#include <QProcess>
+
+#ifdef Q_OS_WIN
+#include <Windows.h>
+#include <ShlObj.h>
+#endif
 
 namespace FullFrame {
 
@@ -798,8 +802,20 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
 
         QAction* openFolderAction = menu.addAction("Show in Explorer");
         connect(openFolderAction, &QAction::triggered, this, [filePath]() {
+#ifdef Q_OS_WIN
             QString nativePath = QDir::toNativeSeparators(filePath);
-            QProcess::startDetached("explorer.exe", {"/select,", nativePath});
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(
+                reinterpret_cast<LPCWSTR>(nativePath.utf16()));
+            if (pidl) {
+                SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+                ILFree(pidl);
+            }
+            CoUninitialize();
+#else
+            QDesktopServices::openUrl(
+                QUrl::fromLocalFile(QFileInfo(filePath).path()));
+#endif
         });
 
         menu.addSeparator();
@@ -906,6 +922,44 @@ void MainWindow::onContextMenu(const QPoint& pos, const QString& filePath)
                 QString::fromUtf8("\xF0\x9F\x93\x81 Create Album from Selection..."));
             connect(createAlbumAction, &QAction::triggered,
                     this, &MainWindow::createAlbumFromSelection);
+        }
+
+        // Sequence actions
+        menu.addSeparator();
+        auto* tagMgr = TagManager::instance();
+        qint64 seqId = tagMgr->sequenceForImage(filePath);
+
+        if (seqId >= 0) {
+            QString coverPath = tagMgr->sequenceCover(seqId);
+            int seqCount = tagMgr->sequenceCount(seqId);
+
+            // Expand / collapse inline
+            QAction* toggleAction = menu.addAction(
+                QString("Expand Sequence (%1 images)").arg(seqCount));
+            connect(toggleAction, &QAction::triggered, this, [this, coverPath]() {
+                m_model->toggleSequenceExpanded(coverPath);
+            });
+
+            if (filePath != coverPath) {
+                QAction* setCoverAction = menu.addAction("Set as Sequence Cover");
+                connect(setCoverAction, &QAction::triggered, this, [this, seqId, filePath]() {
+                    TagManager::instance()->setSequenceCover(seqId, filePath);
+                    if (!m_currentFolder.isEmpty()) openFolder(m_currentFolder);
+                });
+            }
+
+            QAction* breakSeqAction = menu.addAction("Break Sequence");
+            connect(breakSeqAction, &QAction::triggered, this, [this, seqId]() {
+                TagManager::instance()->breakSequence(seqId);
+                if (!m_currentFolder.isEmpty()) openFolder(m_currentFolder);
+            });
+        } else if (selectedPaths.size() >= 2) {
+            QAction* createSeqAction = menu.addAction(
+                QString("Group as Sequence (%1 images)").arg(selectedPaths.size()));
+            connect(createSeqAction, &QAction::triggered, this, [this, selectedPaths, filePath]() {
+                TagManager::instance()->createSequence(selectedPaths, filePath);
+                if (!m_currentFolder.isEmpty()) openFolder(m_currentFolder);
+            });
         }
     }
 
@@ -1331,6 +1385,7 @@ void MainWindow::deleteSelectedImages()
         QFile file(path);
         if (file.moveToTrash()) {
             successCount++;
+            TagManager::instance()->removeFromSequence(path);
         } else {
             failCount++;
         }

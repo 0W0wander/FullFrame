@@ -123,6 +123,29 @@ bool TagManager::createTables()
     query.exec("CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_images_path ON images(path)");
 
+    // Sequence tables
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS sequences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qWarning() << "Failed to create sequences table:" << query.lastError().text();
+    }
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS sequence_items (
+            sequence_id INTEGER NOT NULL,
+            image_path TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            is_cover INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (sequence_id, image_path),
+            FOREIGN KEY (sequence_id) REFERENCES sequences(id) ON DELETE CASCADE
+        )
+    )")) {
+        qWarning() << "Failed to create sequence_items table:" << query.lastError().text();
+    }
+    query.exec("CREATE INDEX IF NOT EXISTS idx_seq_items_path ON sequence_items(image_path)");
+
     return true;
 }
 
@@ -736,6 +759,13 @@ bool TagManager::updateImagePath(const QString& oldPath, const QString& newPath)
         m_imageTagCache.insert(newPath, tags);
     }
 
+    // Update sequence_items
+    QSqlQuery seqQ(m_db);
+    seqQ.prepare("UPDATE sequence_items SET image_path = ? WHERE image_path = ?");
+    seqQ.addBindValue(newPath);
+    seqQ.addBindValue(oldPath);
+    seqQ.exec();
+
     Q_EMIT imagePathUpdated(oldPath, newPath);
     return true;
 }
@@ -910,6 +940,179 @@ bool TagManager::mergeTags(const QString& targetName, const QStringList& sourceN
     m_imageTagCache.clear();
     Q_EMIT tagsChanged();
     return allOk;
+}
+
+// ============== Image Sequences ==============
+
+qint64 TagManager::createSequence(const QStringList& imagePaths, const QString& coverPath)
+{
+    if (imagePaths.size() < 2) return -1;
+
+    // Remove any of these images from existing sequences first
+    for (const QString& p : imagePaths) {
+        qint64 existing = sequenceForImage(p);
+        if (existing >= 0) breakSequence(existing);
+    }
+
+    m_db.transaction();
+
+    QSqlQuery query(m_db);
+    query.exec("INSERT INTO sequences DEFAULT VALUES");
+    qint64 seqId = query.lastInsertId().toLongLong();
+
+    query.prepare("INSERT INTO sequence_items (sequence_id, image_path, position, is_cover) VALUES (?, ?, ?, ?)");
+    for (int i = 0; i < imagePaths.size(); ++i) {
+        query.addBindValue(seqId);
+        query.addBindValue(imagePaths[i]);
+        query.addBindValue(i);
+        query.addBindValue(imagePaths[i] == coverPath ? 1 : 0);
+        query.exec();
+    }
+
+    m_db.commit();
+    Q_EMIT sequencesChanged();
+    return seqId;
+}
+
+bool TagManager::breakSequence(qint64 sequenceId)
+{
+    m_db.transaction();
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM sequence_items WHERE sequence_id = ?");
+    query.addBindValue(sequenceId);
+    query.exec();
+    query.prepare("DELETE FROM sequences WHERE id = ?");
+    query.addBindValue(sequenceId);
+    query.exec();
+    m_db.commit();
+    Q_EMIT sequencesChanged();
+    return true;
+}
+
+bool TagManager::setSequenceCover(qint64 sequenceId, const QString& coverPath)
+{
+    m_db.transaction();
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE sequence_items SET is_cover = 0 WHERE sequence_id = ?");
+    query.addBindValue(sequenceId);
+    query.exec();
+    query.prepare("UPDATE sequence_items SET is_cover = 1 WHERE sequence_id = ? AND image_path = ?");
+    query.addBindValue(sequenceId);
+    query.addBindValue(coverPath);
+    query.exec();
+    m_db.commit();
+    Q_EMIT sequencesChanged();
+    return true;
+}
+
+qint64 TagManager::sequenceForImage(const QString& imagePath) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT sequence_id FROM sequence_items WHERE image_path = ?");
+    query.addBindValue(imagePath);
+    if (query.exec() && query.next())
+        return query.value(0).toLongLong();
+    return -1;
+}
+
+QString TagManager::sequenceCover(qint64 sequenceId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT image_path FROM sequence_items WHERE sequence_id = ? AND is_cover = 1");
+    query.addBindValue(sequenceId);
+    if (query.exec() && query.next())
+        return query.value(0).toString();
+    // Fallback to first item
+    query.prepare("SELECT image_path FROM sequence_items WHERE sequence_id = ? ORDER BY position LIMIT 1");
+    query.addBindValue(sequenceId);
+    if (query.exec() && query.next())
+        return query.value(0).toString();
+    return {};
+}
+
+QStringList TagManager::sequenceImages(qint64 sequenceId) const
+{
+    QStringList paths;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT image_path FROM sequence_items WHERE sequence_id = ? ORDER BY position");
+    query.addBindValue(sequenceId);
+    if (query.exec()) {
+        while (query.next())
+            paths.append(query.value(0).toString());
+    }
+    return paths;
+}
+
+int TagManager::sequenceCount(qint64 sequenceId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT COUNT(*) FROM sequence_items WHERE sequence_id = ?");
+    query.addBindValue(sequenceId);
+    if (query.exec() && query.next())
+        return query.value(0).toInt();
+    return 0;
+}
+
+QHash<QString, int> TagManager::allSequenceCovers() const
+{
+    QHash<QString, int> result;
+    QSqlQuery query(m_db);
+    query.exec(R"(
+        SELECT si.image_path, cnt.c
+        FROM sequence_items si
+        JOIN (SELECT sequence_id, COUNT(*) as c FROM sequence_items GROUP BY sequence_id) cnt
+            ON si.sequence_id = cnt.sequence_id
+        WHERE si.is_cover = 1
+    )");
+    while (query.next())
+        result.insert(query.value(0).toString(), query.value(1).toInt());
+    return result;
+}
+
+QSet<QString> TagManager::hiddenSequenceMembers() const
+{
+    QSet<QString> hidden;
+    QSqlQuery query(m_db);
+    query.exec("SELECT image_path FROM sequence_items WHERE is_cover = 0");
+    while (query.next())
+        hidden.insert(query.value(0).toString());
+    return hidden;
+}
+
+QHash<QString, qint64> TagManager::allImageSequenceIds() const
+{
+    QHash<QString, qint64> result;
+    QSqlQuery query(m_db);
+    query.exec("SELECT image_path, sequence_id FROM sequence_items");
+    while (query.next())
+        result.insert(query.value(0).toString(), query.value(1).toLongLong());
+    return result;
+}
+
+bool TagManager::removeFromSequence(const QString& imagePath)
+{
+    qint64 seqId = sequenceForImage(imagePath);
+    if (seqId < 0) return false;
+
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM sequence_items WHERE image_path = ?");
+    query.addBindValue(imagePath);
+    query.exec();
+
+    // If 1 or fewer members remain, discard the sequence
+    if (sequenceCount(seqId) <= 1) {
+        breakSequence(seqId);
+    } else {
+        // If deleted image was the cover, pick a new one
+        QString cover = sequenceCover(seqId);
+        if (cover.isEmpty()) {
+            QStringList remaining = sequenceImages(seqId);
+            if (!remaining.isEmpty())
+                setSequenceCover(seqId, remaining.first());
+        }
+        Q_EMIT sequencesChanged();
+    }
+    return true;
 }
 
 } // namespace FullFrame

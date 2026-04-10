@@ -15,6 +15,7 @@
 #include <QKeyEvent>
 #include <QShowEvent>
 #include <QContextMenuEvent>
+#include <QMouseEvent>
 #include <QImageReader>
 #include <QDesktopServices>
 #include <QUrl>
@@ -170,7 +171,71 @@ void HorizontalThumbnailDelegate::paint(QPainter* painter, const QStyleOptionVie
         painter->drawPath(starPath);
     }
 
+    // Sequence badge (bottom-left)
+    int seqCount = index.data(SequenceCountRole).toInt();
+    if (seqCount > 1) {
+        bool expanded = index.data(IsSequenceExpandedRole).toBool();
+        QRect badge = sequenceBadgeRect(itemRect);
+
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 190));
+        painter->drawRoundedRect(badge, badge.height() / 2.0, badge.height() / 2.0);
+
+        // Count + chevron
+        QFont f;
+        f.setPointSize(7);
+        f.setBold(true);
+        painter->setFont(f);
+        painter->setPen(Qt::white);
+        QString text = QString::number(seqCount);
+        QRect textArea(badge.left() + 6, badge.top(), 16, badge.height());
+        painter->drawText(textArea, Qt::AlignVCenter | Qt::AlignLeft, text);
+
+        // Chevron
+        int cx = textArea.right() + 2;
+        int cy = badge.top() + badge.height() / 2;
+        QPainterPath chevron;
+        if (expanded) {
+            chevron.moveTo(cx, cy + 2);
+            chevron.lineTo(cx + 3, cy - 2);
+            chevron.lineTo(cx + 6, cy + 2);
+        } else {
+            chevron.moveTo(cx, cy - 2);
+            chevron.lineTo(cx + 3, cy + 2);
+            chevron.lineTo(cx + 6, cy - 2);
+        }
+        chevron.closeSubpath();
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(Qt::white);
+        painter->drawPath(chevron);
+    }
+
     painter->restore();
+}
+
+QRect HorizontalThumbnailDelegate::sequenceBadgeRect(const QRect& itemRect) const
+{
+    int w = 38, h = 16;
+    return QRect(itemRect.left() + 3, itemRect.bottom() - h - 3, w, h);
+}
+
+bool HorizontalThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model,
+                                               const QStyleOptionViewItem& option,
+                                               const QModelIndex& index)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        int seqCount = index.data(SequenceCountRole).toInt();
+        if (seqCount > 1) {
+            QRect badge = sequenceBadgeRect(option.rect);
+            if (badge.contains(me->pos())) {
+                QString coverPath = index.data(FilePathRole).toString();
+                Q_EMIT sequenceToggleRequested(coverPath);
+                return true;
+            }
+        }
+    }
+    return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 
 QSize HorizontalThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option,
@@ -1160,6 +1225,8 @@ void TaggingModeWidget::setModel(ImageThumbnailModel* model)
     m_thumbnailStrip->setModel(model);
     
     if (m_model) {
+        connect(m_delegate, &HorizontalThumbnailDelegate::sequenceToggleRequested,
+                m_model, &ImageThumbnailModel::toggleSequenceExpanded);
         connect(m_model, &ImageThumbnailModel::loadingFinished, this, &TaggingModeWidget::onModelReset);
         connect(m_model, &QAbstractItemModel::modelReset, this, &TaggingModeWidget::onModelReset);
         

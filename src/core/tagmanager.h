@@ -104,6 +104,22 @@ public:
     bool setTagParent(qint64 tagId, qint64 parentId);
     bool groupTagsUnderParent(const QString& parentName, const QStringList& childNames);
     bool mergeTags(const QString& targetName, const QStringList& sourceNames);
+    
+    // Image sequences (stacking)
+    qint64 createSequence(const QStringList& imagePaths, const QString& coverPath);
+    bool breakSequence(qint64 sequenceId);
+    bool setSequenceCover(qint64 sequenceId, const QString& coverPath);
+    qint64 sequenceForImage(const QString& imagePath) const;
+    QString sequenceCover(qint64 sequenceId) const;
+    QStringList sequenceImages(qint64 sequenceId) const;
+    int sequenceCount(qint64 sequenceId) const;
+    // Returns cover path → member count for all sequences
+    QHash<QString, int> allSequenceCovers() const;
+    // Returns set of paths that are non-cover sequence members (should be hidden)
+    QSet<QString> hiddenSequenceMembers() const;
+    // Returns image_path → sequence_id for every sequence member
+    QHash<QString, qint64> allImageSequenceIds() const;
+    bool removeFromSequence(const QString& imagePath);
 
 Q_SIGNALS:
     void tagCreated(qint64 tagId, const QString& name);
@@ -116,6 +132,7 @@ Q_SIGNALS:
     void imagePathUpdated(const QString& oldPath, const QString& newPath);
     void tagAlbumPathChanged(qint64 tagId, const QString& albumPath);
     void tagsChanged();
+    void sequencesChanged();
 
 private:
     explicit TagManager(QObject* parent = nullptr);

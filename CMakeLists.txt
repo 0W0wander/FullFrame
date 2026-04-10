@@ -146,6 +146,7 @@ endif()
 # Platform-specific settings
 if(WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Shell32 Ole32)
 endif()
 
 # On Windows, automatically deploy Qt DLLs after building

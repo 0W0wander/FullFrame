@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QApplication>
 #include <QPainterPath>
+#include <QMouseEvent>
 #include <cmath>
 
 namespace FullFrame {
@@ -129,6 +130,15 @@ void ThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     if (isFavorited) {
         painter->setRenderHint(QPainter::Antialiasing, true);
         paintFavoriteStar(painter, thumbRect, ratingValue);
+        painter->setRenderHint(QPainter::Antialiasing, false);
+    }
+
+    // Sequence stack badge (top-left corner)
+    int seqCount = index.data(SequenceCountRole).toInt();
+    if (seqCount > 1) {
+        bool seqExpanded = index.data(IsSequenceExpandedRole).toBool();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        paintSequenceBadge(painter, thumbRect, seqCount, seqExpanded);
         painter->setRenderHint(QPainter::Antialiasing, false);
     }
 
@@ -388,9 +398,88 @@ void ThumbnailDelegate::paintRating(QPainter* painter, const QRect& rect, int ra
     }
 }
 
+QRect ThumbnailDelegate::sequenceBadgeRect(const QRect& thumbRect) const
+{
+    int margin = 4;
+    // The entire clickable badge area in the top-left corner
+    return QRect(thumbRect.left() + margin, thumbRect.top() + margin, 68, 22);
+}
+
+void ThumbnailDelegate::paintSequenceBadge(QPainter* painter, const QRect& rect,
+                                            int count, bool expanded) const
+{
+    QRect badge = sequenceBadgeRect(rect);
+
+    // Background pill
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 180));
+    painter->drawRoundedRect(badge, badge.height() / 2.0, badge.height() / 2.0);
+
+    // Stack icon (two tiny offset rectangles)
+    int iconX = badge.left() + 6;
+    int iconY = badge.top() + 4;
+    int cw = 10, ch = 8;
+    painter->setPen(QPen(QColor(180, 180, 180), 1));
+    painter->setBrush(QColor(100, 100, 100, 180));
+    painter->drawRoundedRect(iconX + 2, iconY, cw, ch, 1, 1);
+    painter->setBrush(QColor(70, 70, 70, 220));
+    painter->drawRoundedRect(iconX, iconY + 2, cw, ch, 1, 1);
+
+    // Count text
+    painter->setFont(m_badgeFont);
+    QString text = QString::number(count);
+    painter->setPen(Qt::white);
+    QRect textArea(iconX + cw + 4, badge.top(), 20, badge.height());
+    painter->drawText(textArea, Qt::AlignVCenter | Qt::AlignLeft, text);
+
+    // Chevron arrow (▼ or ▲)
+    int chevX = textArea.right() + 2;
+    int chevY = badge.top() + badge.height() / 2;
+    QPainterPath chevron;
+    if (expanded) {
+        // Up arrow ▲
+        chevron.moveTo(chevX, chevY + 2);
+        chevron.lineTo(chevX + 4, chevY - 3);
+        chevron.lineTo(chevX + 8, chevY + 2);
+    } else {
+        // Down arrow ▼
+        chevron.moveTo(chevX, chevY - 2);
+        chevron.lineTo(chevX + 4, chevY + 3);
+        chevron.lineTo(chevX + 8, chevY - 2);
+    }
+    chevron.closeSubpath();
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(Qt::white);
+    painter->drawPath(chevron);
+}
+
 void ThumbnailDelegate::paintHoverEffect(QPainter* painter, const QRect& rect) const
 {
     painter->fillRect(rect, m_hoverColor);
+}
+
+// ============== Click handling ==============
+
+bool ThumbnailDelegate::editorEvent(QEvent* event, QAbstractItemModel* model,
+                                     const QStyleOptionViewItem& option,
+                                     const QModelIndex& index)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        int seqCount = index.data(SequenceCountRole).toInt();
+        if (seqCount > 1) {
+            QRect thumbRect(option.rect.x() + m_spacing,
+                            option.rect.y() + m_spacing,
+                            m_thumbnailSize, m_thumbnailSize);
+            QRect badge = sequenceBadgeRect(thumbRect);
+            if (badge.contains(me->pos())) {
+                QString coverPath = index.data(FilePathRole).toString();
+                Q_EMIT sequenceToggleRequested(coverPath);
+                return true;
+            }
+        }
+    }
+    return QStyledItemDelegate::editorEvent(event, model, option, index);
 }
 
 // ============== Size Hint ==============

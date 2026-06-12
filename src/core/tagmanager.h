@@ -49,7 +49,9 @@ public:
 
     // Database initialization
     bool initialize(const QString& dbPath);
+    bool reinitialize(const QString& dbPath);
     bool isInitialized() const { return m_initialized; }
+    QString databasePath() const { return m_db.databaseName(); }
 
     // Tag management
     qint64 createTag(const QString& name, const QString& color = QString(), qint64 parentId = -1);
@@ -65,6 +67,11 @@ public:
     
     // Update image path (after file move)
     bool updateImagePath(const QString& oldPath, const QString& newPath);
+
+    // Image ratings (1-5 stars; 0 clears the rating)
+    bool setRating(const QString& imagePath, int rating);
+    int rating(const QString& imagePath) const;
+    QHash<QString, int> allRatings() const;
     
     // Tag queries
     Tag tag(qint64 tagId) const;

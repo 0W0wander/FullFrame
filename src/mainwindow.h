@@ -18,6 +18,9 @@
 #include <QProgressBar>
 #include <QStackedWidget>
 #include <QAction>
+#include <QHBoxLayout>
+
+class QSplitter;
 
 namespace FullFrame {
 
@@ -48,6 +51,7 @@ private Q_SLOTS:
     void onTagFilterChanged(const QSet<qint64>& tagIds);
     void onContextMenu(const QPoint& pos, const QString& filePath);
     void showAboutDialog();
+    void showShortcutsDialog();
     void deleteSelectedImages();
     void onThumbnailReady(const QString& filePath);
     void onThumbnailFailed(const QString& filePath);
@@ -57,6 +61,7 @@ private Q_SLOTS:
     void setGalleryMode();
     void setTaggingMode();
     void toggleSidebar();
+    void setSidebarCollapsed(bool collapsed);
     void createAlbumFromSelection();
     void onImageTaggedForAlbum(const QString& imagePath, qint64 tagId);
     void onTagLinkedToFolder(qint64 tagId, const QString& albumPath);
@@ -71,9 +76,16 @@ private:
     void setupStatusBar();
     void setupShortcuts();
     void initializeDatabase();
+    void initializeDatabase(const QString& folderPath);
     void loadSettings();
     void saveSettings();
+    void loadRatingsFromDb();
     void reapplySort();
+
+    // Fullscreen / immersive display modes
+    void cycleDisplayMode();
+    void applyDisplayMode();
+    void checkImmersiveHover();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -130,6 +142,20 @@ private:
     
     // Album auto-move batching
     QTimer* m_albumRefreshTimer = nullptr;
+
+    // Display mode (fullscreen / immersive)
+    enum DisplayMode { DisplayNormal, DisplayFullscreen, DisplayImmersive };
+    DisplayMode m_displayMode = DisplayNormal;
+    QTimer* m_immersiveTimer = nullptr;
+
+    // Top bar layout (menu bar corner widget) for relocating sidebar buttons
+    QHBoxLayout* m_topBarLayout = nullptr;
+    int m_sidebarButtonInsertIndex = 0;
+
+    // Sidebar splitter / collapse state
+    QSplitter* m_splitter = nullptr;
+    bool m_sidebarCollapsed = false;
+    int m_sidebarWidth = 240;
 };
 
 } // namespace FullFrame

@@ -29,6 +29,7 @@ if ($InnoSetupPath -and (Test-Path $InnoSetupPath)) {
     } catch {
         # Not in PATH, check common installation locations
         $searchPaths = @(
+            "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
             "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe",

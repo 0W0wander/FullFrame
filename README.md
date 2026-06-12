@@ -17,6 +17,14 @@
 
 You can either **run the installer from the latest GitHub release** or **build from source**.
 
+### Windows installer
+
+Download **`FullFrame-Setup-x.y.z.exe`** from the [latest GitHub release](https://github.com/0W0wander/FullFrame/releases/latest) and run it.
+
+To build the installer yourself or publish a new version, see **[RELEASING.md](RELEASING.md)**.
+
+---
+
 ### Building from Source
 
 #### Requirements

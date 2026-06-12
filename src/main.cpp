@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
     
     // Application metadata
     app.setApplicationName("FullFrame");
-    app.setApplicationVersion("1.0.0");
+    app.setApplicationVersion("1.2.0");
     app.setOrganizationName("FullFrame");
     app.setOrganizationDomain("fullframe.app");
     

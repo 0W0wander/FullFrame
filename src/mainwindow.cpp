@@ -13,13 +13,15 @@
 
 #include <QApplication>
 #include <QMenuBar>
+#include <QFileInfo>
+#include <QCursor>
 #include <QMenu>
 #include <QToolBar>
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QSettings>
-#include <QStandardPaths>
+#include <QDir>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QSplitter>
@@ -111,37 +113,55 @@ MainWindow::~MainWindow()
 
 void MainWindow::initializeDatabase()
 {
-    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dataPath);
-    
-    QString dbPath = dataPath + "/fullframe.db";
-    
-    if (!TagManager::instance()->initialize(dbPath)) {
-        QMessageBox::warning(this, "Database Error",
-            "Failed to initialize tag database. Tagging will be disabled.");
-        return;
+    // Deferred initialization - database will be initialized when a folder is opened
+}
+
+void MainWindow::initializeDatabase(const QString& folderPath)
+{
+    QString dbPath = folderPath + "/fullframe.db";
+
+    if (TagManager::instance()->isInitialized()) {
+        if (TagManager::instance()->databasePath() == dbPath) {
+            return;
+        }
+        if (!TagManager::instance()->reinitialize(dbPath)) {
+            QMessageBox::warning(this, "Database Error",
+                "Failed to initialize tag database. Tagging will be disabled.");
+            return;
+        }
+    } else {
+        if (!TagManager::instance()->initialize(dbPath)) {
+            QMessageBox::warning(this, "Database Error",
+                "Failed to initialize tag database. Tagging will be disabled.");
+            return;
+        }
     }
 }
 
 void MainWindow::setupUI()
 {
-    // Central widget with splitter
+    // Central widget with a draggable splitter
     QWidget* centralWidget = new QWidget(this);
     QHBoxLayout* mainLayout = new QHBoxLayout(centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
+    m_splitter = new QSplitter(Qt::Horizontal, this);
+    m_splitter->setChildrenCollapsible(true);
+    m_splitter->setHandleWidth(4);
+    m_splitter->setStyleSheet(R"(
+        QSplitter::handle {
+            background-color: #3d3d3d;
+        }
+        QSplitter::handle:hover {
+            background-color: #005a9e;
+        }
+    )");
+
     // Tag sidebar
     m_tagSidebar = new TagSidebar(this);
     m_tagSidebar->refresh();
-    mainLayout->addWidget(m_tagSidebar);
-
-    // Separator
-    QFrame* separator = new QFrame(this);
-    separator->setFrameShape(QFrame::VLine);
-    separator->setStyleSheet("background-color: #3d3d3d;");
-    separator->setFixedWidth(1);
-    mainLayout->addWidget(separator);
+    m_splitter->addWidget(m_tagSidebar);
 
     // Create model (shared between views)
     m_model = new ImageThumbnailModel(this);
@@ -159,7 +179,27 @@ void MainWindow::setupUI()
     m_taggingMode->setModel(m_model);
     m_viewStack->addWidget(m_taggingMode);
     
-    mainLayout->addWidget(m_viewStack, 1);
+    m_splitter->addWidget(m_viewStack);
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+    m_splitter->setSizes({ m_sidebarWidth, 1000 });
+
+    // Snap the sidebar closed when it is dragged narrow enough to collapse.
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this](int, int) {
+        if (m_sidebarCollapsed) {
+            return;
+        }
+        const QList<int> sizes = m_splitter->sizes();
+        if (!sizes.isEmpty()) {
+            if (sizes.first() == 0) {
+                setSidebarCollapsed(true);
+            } else {
+                m_sidebarWidth = sizes.first();
+            }
+        }
+    });
+
+    mainLayout->addWidget(m_splitter);
 
     setCentralWidget(centralWidget);
 
@@ -342,8 +382,9 @@ void MainWindow::setupMenuBar()
     
     QAction* openDbFolderAction = prefsMenu->addAction("Open &Database Folder...");
     connect(openDbFolderAction, &QAction::triggered, this, [this]() {
-        QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        QDesktopServices::openUrl(QUrl::fromLocalFile(dataPath));
+        if (!m_currentFolder.isEmpty()) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(m_currentFolder));
+        }
     });
     
     prefsMenu->addSeparator();
@@ -356,6 +397,12 @@ void MainWindow::setupMenuBar()
 
     // Help menu
     QMenu* helpMenu = menuBar->addMenu("&Help");
+    
+    QAction* shortcutsAction = helpMenu->addAction("⌨ &Keyboard Shortcuts");
+    shortcutsAction->setShortcut(QKeySequence::HelpContents);
+    connect(shortcutsAction, &QAction::triggered, this, &MainWindow::showShortcutsDialog);
+    
+    helpMenu->addSeparator();
     
     QAction* aboutAction = helpMenu->addAction("&About FullFrame");
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAboutDialog);
@@ -371,6 +418,9 @@ void MainWindow::setupToolBar()
     QHBoxLayout* layout = new QHBoxLayout(menuBarWidget);
     layout->setContentsMargins(8, 0, 8, 0);
     layout->setSpacing(8);
+    m_topBarLayout = layout;
+    // Sidebar buttons get inserted right after the Open button when collapsed
+    m_sidebarButtonInsertIndex = 1;
 
     // Open folder button
     QPushButton* openButton = new QPushButton("📁 Open", this);
@@ -633,6 +683,76 @@ void MainWindow::setupShortcuts()
             openFolder(m_currentFolder);
         }
     });
+
+    // F11 cycles: Normal -> Fullscreen -> Immersive (auto-hide top bar) -> Normal
+    new QShortcut(QKeySequence(Qt::Key_F11), this, [this]() {
+        cycleDisplayMode();
+    });
+
+    // Timer that reveals/hides the top bar based on cursor position in immersive mode
+    m_immersiveTimer = new QTimer(this);
+    m_immersiveTimer->setInterval(100);
+    connect(m_immersiveTimer, &QTimer::timeout, this, &MainWindow::checkImmersiveHover);
+}
+
+void MainWindow::cycleDisplayMode()
+{
+    switch (m_displayMode) {
+    case DisplayNormal:     m_displayMode = DisplayFullscreen; break;
+    case DisplayFullscreen: m_displayMode = DisplayImmersive; break;
+    case DisplayImmersive:  m_displayMode = DisplayNormal; break;
+    }
+    applyDisplayMode();
+}
+
+void MainWindow::applyDisplayMode()
+{
+    switch (m_displayMode) {
+    case DisplayNormal:
+        if (m_immersiveTimer) m_immersiveTimer->stop();
+        menuBar()->show();
+        statusBar()->show();
+        showNormal();
+        m_statusLabel->setText("Windowed");
+        break;
+    case DisplayFullscreen:
+        if (m_immersiveTimer) m_immersiveTimer->stop();
+        menuBar()->show();
+        statusBar()->show();
+        showFullScreen();
+        m_statusLabel->setText("Fullscreen — press F11 for immersive");
+        break;
+    case DisplayImmersive:
+        showFullScreen();
+        statusBar()->hide();
+        menuBar()->hide();
+        if (m_immersiveTimer) m_immersiveTimer->start();
+        m_statusLabel->setText("Immersive — move mouse to the top to reveal the bar");
+        break;
+    }
+}
+
+void MainWindow::checkImmersiveHover()
+{
+    if (m_displayMode != DisplayImmersive) {
+        return;
+    }
+
+    QMenuBar* mb = menuBar();
+    const QPoint pos = mapFromGlobal(QCursor::pos());
+    const int revealZone = 3;            // px from the top edge that triggers reveal
+    const bool insideWidth = pos.x() >= 0 && pos.x() < width();
+
+    if (mb->isVisible()) {
+        // Hide once the cursor drops below the bar (with a little slack).
+        if (pos.y() > mb->height() + 12 || pos.y() < 0 || !insideWidth) {
+            mb->hide();
+        }
+    } else {
+        if (insideWidth && pos.y() >= 0 && pos.y() <= revealZone) {
+            mb->show();
+        }
+    }
 }
 
 // ============== Public Slots ==============
@@ -651,11 +771,18 @@ void MainWindow::openFolder(const QString& path)
 {
     m_currentFolder = path;
     m_pathEdit->setText(path);
-    
+
+    // Initialize database at the folder root
+    initializeDatabase(path);
+
     // Clear the search bar when opening a new folder
     m_searchEdit->clear();
-    
+
     m_model->loadDirectory(path);
+
+    // Ratings are stored in the per-folder database
+    loadRatingsFromDb();
+
     m_tagSidebar->setCurrentDirectoryPaths(m_model->allFilePaths());
     m_tagSidebar->refresh();
 }
@@ -979,7 +1106,87 @@ void MainWindow::showAboutDialog()
         "<li>LRU caching for instant re-display</li>"
         "<li>Tag-based image organization</li>"
         "</ul>"
-        "<p>Version 1.0.0</p>");
+        "<p>Version 1.2.0</p>");
+}
+
+void MainWindow::showShortcutsDialog()
+{
+    auto row = [](const QString& keys, const QString& desc) {
+        return QString(
+            "<tr>"
+            "<td style='padding:3px 18px 3px 0; color:#4da6ff; font-family:Consolas,monospace; white-space:nowrap;'><b>%1</b></td>"
+            "<td style='padding:3px 0; color:#e0e0e0;'>%2</td>"
+            "</tr>").arg(keys.toHtmlEscaped(), desc.toHtmlEscaped());
+    };
+
+    auto header = [](const QString& title) {
+        return QString(
+            "<tr><td colspan='2' style='padding:12px 0 4px 0; color:#909090; "
+            "font-size:11px; letter-spacing:1px;'><b>%1</b></td></tr>").arg(title.toHtmlEscaped());
+    };
+
+    QString html = "<table style='border-collapse:collapse;'>";
+
+    html += header("VIEW");
+    html += row("Ctrl+1", "Gallery mode");
+    html += row("Ctrl+2", "Tagging mode");
+    html += row("Ctrl+B", "Toggle / snap the sidebar");
+    html += row("F11", "Cycle fullscreen: Normal → Fullscreen → Immersive");
+    html += row("Ctrl++ / Ctrl+-", "Zoom thumbnails in / out");
+    html += row("F5 / Ctrl+R", "Refresh current folder");
+
+    html += header("SELECTION & FILES");
+    html += row("Esc", "Clear selection");
+    html += row("Delete", "Move selected to Recycle Bin");
+
+    html += header("RATINGS & FAVORITES");
+    html += row("1 – 5", "Set star rating on selection (when Rating Hotkeys are on)");
+    html += row("F", "Toggle favorite on selection");
+
+    html += header("TAGS");
+    html += row("0–9, A–Z, F1–F12", "Apply a tag by its assigned hotkey");
+    html += row("Click the □ on a tag", "Assign / change that tag's hotkey");
+
+    html += "</table>";
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("Keyboard Shortcuts");
+    dialog.setStyleSheet("QDialog { background-color: #1e1e1e; }");
+    dialog.setMinimumWidth(460);
+
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(20, 16, 20, 16);
+
+    QLabel* title = new QLabel("<h2 style='color:#ffffff; margin:0;'>Keyboard Shortcuts</h2>", &dialog);
+    layout->addWidget(title);
+
+    QLabel* body = new QLabel(html, &dialog);
+    body->setTextFormat(Qt::RichText);
+    body->setWordWrap(true);
+    layout->addWidget(body);
+
+    layout->addStretch();
+
+    QPushButton* closeBtn = new QPushButton("Close", &dialog);
+    closeBtn->setStyleSheet(R"(
+        QPushButton {
+            background-color: #005a9e;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 16px;
+            color: white;
+            font-weight: bold;
+        }
+        QPushButton:hover { background-color: #0068b8; }
+    )");
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    QHBoxLayout* btnRow = new QHBoxLayout();
+    btnRow->addStretch();
+    btnRow->addWidget(closeBtn);
+    layout->addLayout(btnRow);
+
+    dialog.exec();
 }
 
 // ============== Settings ==============
@@ -1009,21 +1216,10 @@ void MainWindow::loadSettings()
         m_model->setFavorites(m_favorites);
     }
     
-    // Load ratings
+    // Rating hotkey preference (the ratings themselves live in the per-folder db)
     m_ratingHotkeysEnabled = settings.value("ratingHotkeysEnabled", true).toBool();
     if (m_ratingHotkeysAction) {
         m_ratingHotkeysAction->setChecked(m_ratingHotkeysEnabled);
-    }
-    QVariantMap ratingsMap = settings.value("ratings").toMap();
-    m_ratings.clear();
-    for (auto it = ratingsMap.constBegin(); it != ratingsMap.constEnd(); ++it) {
-        int val = it.value().toInt();
-        if (val >= 1 && val <= 5) {
-            m_ratings.insert(it.key(), val);
-        }
-    }
-    if (m_model) {
-        m_model->setRatings(m_ratings);
     }
     
     // Load sort mode
@@ -1054,16 +1250,52 @@ void MainWindow::saveSettings()
     settings.setValue("showAlbumFiles", m_showAlbumFiles);
     settings.setValue("favorites", QStringList(m_favorites.begin(), m_favorites.end()));
     
-    // Save ratings
+    // Rating hotkey preference (ratings themselves are persisted in the db)
     settings.setValue("ratingHotkeysEnabled", m_ratingHotkeysEnabled);
-    QVariantMap ratingsMap;
-    for (auto it = m_ratings.constBegin(); it != m_ratings.constEnd(); ++it) {
-        ratingsMap.insert(it.key(), it.value());
-    }
-    settings.setValue("ratings", ratingsMap);
     
     // Save sort mode
     settings.setValue("sortMode", m_sortMode);
+}
+
+void MainWindow::loadRatingsFromDb()
+{
+    if (!TagManager::instance()->isInitialized()) {
+        return;
+    }
+
+    QHash<QString, int> dbRatings = TagManager::instance()->allRatings();
+
+    // One-time migration of legacy ratings that used to live in QSettings.
+    if (dbRatings.isEmpty()) {
+        QSettings settings("FullFrame", "FullFrame");
+        bool migrated = settings.value("ratingsMigratedToDb", false).toBool();
+        QVariantMap legacy = settings.value("ratings").toMap();
+        if (!migrated && !legacy.isEmpty() && !m_currentFolder.isEmpty()) {
+            int count = 0;
+            for (auto it = legacy.constBegin(); it != legacy.constEnd(); ++it) {
+                int val = it.value().toInt();
+                if (val < 1 || val > 5) {
+                    continue;
+                }
+                // Remap legacy absolute paths to the current folder by filename.
+                QString fileName = QFileInfo(it.key()).fileName();
+                QString candidate = m_currentFolder + "/" + fileName;
+                if (QFile::exists(candidate)) {
+                    TagManager::instance()->setRating(candidate, val);
+                    ++count;
+                }
+            }
+            settings.setValue("ratingsMigratedToDb", true);
+            if (count > 0) {
+                dbRatings = TagManager::instance()->allRatings();
+            }
+        }
+    }
+
+    m_ratings = dbRatings;
+    if (m_model) {
+        m_model->setRatings(m_ratings);
+    }
 }
 
 // ============== Events ==============
@@ -1302,6 +1534,7 @@ void MainWindow::setRatingSelected(int rating)
         // Remove rating
         for (const QString& path : selectedPaths) {
             m_ratings.remove(path);
+            TagManager::instance()->setRating(path, 0);
             if (m_model) {
                 m_model->setRating(path, 0);
             }
@@ -1311,6 +1544,7 @@ void MainWindow::setRatingSelected(int rating)
         // Set rating
         for (const QString& path : selectedPaths) {
             m_ratings.insert(path, rating);
+            TagManager::instance()->setRating(path, rating);
             if (m_model) {
                 m_model->setRating(path, rating);
             }
@@ -1322,8 +1556,6 @@ void MainWindow::setRatingSelected(int rating)
     if (m_model && m_sortMode == "ranking") {
         m_model->sortByRanking(m_favorites, m_ratings);
     }
-    
-    saveSettings();
 }
 
 void MainWindow::deleteSelectedImages()
@@ -1422,27 +1654,30 @@ void MainWindow::deleteSelectedImages()
 
 void MainWindow::exportDatabase()
 {
-    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString dbPath = dataPath + "/fullframe.db";
-    
+    if (m_currentFolder.isEmpty() || !TagManager::instance()->isInitialized()) {
+        QMessageBox::warning(this, "Export Database", "No database loaded. Open a folder first.");
+        return;
+    }
+
+    QString dbPath = m_currentFolder + "/fullframe.db";
+
     if (!QFile::exists(dbPath)) {
         QMessageBox::warning(this, "Export Database", "No database file found.");
         return;
     }
-    
+
     QString savePath = QFileDialog::getSaveFileName(this, "Export Database",
         QDir::homePath() + "/fullframe_backup.db",
         "SQLite Database (*.db)");
-    
+
     if (savePath.isEmpty()) {
         return;
     }
-    
-    // Remove existing file if it exists
+
     if (QFile::exists(savePath)) {
         QFile::remove(savePath);
     }
-    
+
     if (QFile::copy(dbPath, savePath)) {
         QMessageBox::information(this, "Export Database",
             QString("Database exported successfully to:\n%1").arg(savePath));
@@ -1454,6 +1689,11 @@ void MainWindow::exportDatabase()
 
 void MainWindow::importDatabase()
 {
+    if (m_currentFolder.isEmpty()) {
+        QMessageBox::warning(this, "Import Database", "Open a folder first before importing.");
+        return;
+    }
+
     QString importPath = QFileDialog::getOpenFileName(this, "Import Database",
         QDir::homePath(),
         "SQLite Database (*.db)");
@@ -1472,11 +1712,7 @@ void MainWindow::importDatabase()
         return;
     }
     
-    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString dbPath = dataPath + "/fullframe.db";
-    
-    // Close the current database connection
-    // Note: TagManager would need a method to close/reopen, for now we just copy
+    QString dbPath = m_currentFolder + "/fullframe.db";
     
     // Backup current database
     QString backupPath = dbPath + ".backup";
@@ -1487,11 +1723,12 @@ void MainWindow::importDatabase()
     }
     
     if (QFile::copy(importPath, dbPath)) {
+        // Reinitialize with the new database
+        TagManager::instance()->reinitialize(dbPath);
+        m_tagSidebar->refresh();
         QMessageBox::information(this, "Import Database",
-            "Database imported successfully.\n\n"
-            "Please restart FullFrame for changes to take effect.");
+            "Database imported successfully.");
     } else {
-        // Restore backup
         if (QFile::exists(backupPath)) {
             QFile::copy(backupPath, dbPath);
         }
@@ -1559,9 +1796,47 @@ void MainWindow::setTaggingMode()
 
 void MainWindow::toggleSidebar()
 {
-    bool visible = m_tagSidebar->isVisible();
-    m_tagSidebar->setVisible(!visible);
-    m_toggleSidebarAction->setChecked(!visible);
+    setSidebarCollapsed(!m_sidebarCollapsed);
+}
+
+void MainWindow::setSidebarCollapsed(bool collapsed)
+{
+    if (collapsed == m_sidebarCollapsed) {
+        return;
+    }
+    m_sidebarCollapsed = collapsed;
+
+    if (collapsed) {
+        // Remember the current width so we can restore it later.
+        if (m_splitter) {
+            const QList<int> sizes = m_splitter->sizes();
+            if (!sizes.isEmpty() && sizes.first() > 0) {
+                m_sidebarWidth = sizes.first();
+            }
+        }
+        // Relocate the Untagged/Tagging buttons into the top bar.
+        if (m_topBarLayout) {
+            QWidget* row = m_tagSidebar->buttonRowWidget();
+            if (row) {
+                m_topBarLayout->insertWidget(m_sidebarButtonInsertIndex, row);
+                row->show();
+            }
+        }
+        m_tagSidebar->hide();
+    } else {
+        // Move the buttons back and restore the sidebar to its prior width.
+        m_tagSidebar->reclaimButtonRow();
+        m_tagSidebar->show();
+        if (m_splitter) {
+            int total = m_splitter->width();
+            int rest = qMax(0, total - m_sidebarWidth);
+            m_splitter->setSizes({ m_sidebarWidth, rest });
+        }
+    }
+
+    if (m_toggleSidebarAction) {
+        m_toggleSidebarAction->setChecked(!collapsed);
+    }
 }
 
 // ============== Album Support ==============

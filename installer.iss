@@ -2,9 +2,9 @@
 ; This script creates a Windows installer for the FullFrame application
 
 #define MyAppName "FullFrame"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "FullFrame"
-#define MyAppURL "https://github.com/yourusername/FullFrame"
+#define MyAppURL "https://github.com/0W0wander/FullFrame"
 #define MyAppExeName "FullFrame.exe"
 #ifndef BuildDir
   #define BuildDir "build"

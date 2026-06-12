@@ -63,6 +63,20 @@ bool TagManager::initialize(const QString& dbPath)
     return true;
 }
 
+bool TagManager::reinitialize(const QString& dbPath)
+{
+    if (m_db.isOpen()) {
+        m_db.close();
+    }
+    m_initialized = false;
+    m_tagCache.clear();
+    m_imageTagCache.clear();
+
+    QSqlDatabase::removeDatabase("fullframe_tags");
+
+    return initialize(dbPath);
+}
+
 bool TagManager::createTables()
 {
     QSqlQuery query(m_db);
@@ -145,6 +159,16 @@ bool TagManager::createTables()
         qWarning() << "Failed to create sequence_items table:" << query.lastError().text();
     }
     query.exec("CREATE INDEX IF NOT EXISTS idx_seq_items_path ON sequence_items(image_path)");
+
+    // Ratings table (1-5 stars per image)
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS ratings (
+            image_path TEXT PRIMARY KEY,
+            rating INTEGER NOT NULL
+        )
+    )")) {
+        qWarning() << "Failed to create ratings table:" << query.lastError().text();
+    }
 
     return true;
 }
@@ -766,8 +790,58 @@ bool TagManager::updateImagePath(const QString& oldPath, const QString& newPath)
     seqQ.addBindValue(oldPath);
     seqQ.exec();
 
+    // Update ratings
+    QSqlQuery ratingQ(m_db);
+    ratingQ.prepare("UPDATE ratings SET image_path = ? WHERE image_path = ?");
+    ratingQ.addBindValue(newPath);
+    ratingQ.addBindValue(oldPath);
+    ratingQ.exec();
+
     Q_EMIT imagePathUpdated(oldPath, newPath);
     return true;
+}
+
+// ============== Image Ratings ==============
+
+bool TagManager::setRating(const QString& imagePath, int rating)
+{
+    QSqlQuery query(m_db);
+    if (rating <= 0) {
+        query.prepare("DELETE FROM ratings WHERE image_path = ?");
+        query.addBindValue(imagePath);
+    } else {
+        query.prepare("INSERT OR REPLACE INTO ratings (image_path, rating) VALUES (?, ?)");
+        query.addBindValue(imagePath);
+        query.addBindValue(rating);
+    }
+    if (!query.exec()) {
+        qWarning() << "Failed to set rating:" << query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+int TagManager::rating(const QString& imagePath) const
+{
+    QSqlQuery query(m_db);
+    query.prepare("SELECT rating FROM ratings WHERE image_path = ?");
+    query.addBindValue(imagePath);
+    if (query.exec() && query.next()) {
+        return query.value(0).toInt();
+    }
+    return 0;
+}
+
+QHash<QString, int> TagManager::allRatings() const
+{
+    QHash<QString, int> result;
+    QSqlQuery query(m_db);
+    if (query.exec("SELECT image_path, rating FROM ratings")) {
+        while (query.next()) {
+            result.insert(query.value(0).toString(), query.value(1).toInt());
+        }
+    }
+    return result;
 }
 
 // ============== Tag Image Counts ==============

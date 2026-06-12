@@ -6,6 +6,7 @@ dist/
 
 # Release archives
 *.zip
+installer/*.exe
 
 # CMake
 CMakeCache.txt

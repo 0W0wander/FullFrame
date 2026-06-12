@@ -114,6 +114,12 @@ public:
     // Check if sidebar is awaiting a hotkey assignment
     qint64 awaitingHotkeyTagId() const { return m_awaitingHotkeyTagId; }
 
+    // The container holding the "Untagged"/"Tagging" buttons. The main window
+    // relocates this into the top bar when the sidebar is collapsed.
+    QWidget* buttonRowWidget() const { return m_buttonRowContainer; }
+    // Re-insert the button row back into the sidebar (after it was relocated).
+    void reclaimButtonRow();
+
 Q_SIGNALS:
     void tagFilterChanged(const QSet<qint64>& tagIds);
     void showUntaggedChanged(bool showUntagged);
@@ -171,6 +177,8 @@ private:
     QPushButton* m_createButton;
     QPushButton* m_untaggedButton;
     QPushButton* m_taggingModeButton;
+    QWidget* m_buttonRowContainer = nullptr;
+    QVBoxLayout* m_mainLayout = nullptr;
     QLabel* m_statusLabel;
     QLabel* m_selectionLabel;
     

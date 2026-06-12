@@ -329,6 +329,7 @@ void TagSidebar::setupUI()
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 10, 8, 8);
     layout->setSpacing(6);
+    m_mainLayout = layout;
 
     // Header row with title and hint
     QHBoxLayout* headerLayout = new QHBoxLayout();
@@ -350,8 +351,11 @@ void TagSidebar::setupUI()
     
     layout->addLayout(headerLayout);
 
-    // Button row: Show Untagged + Tagging Mode
-    QHBoxLayout* buttonRow = new QHBoxLayout();
+    // Button row: Show Untagged + Tagging Mode (in a container so it can be
+    // relocated to the top bar when the sidebar is collapsed)
+    m_buttonRowContainer = new QWidget(this);
+    QHBoxLayout* buttonRow = new QHBoxLayout(m_buttonRowContainer);
+    buttonRow->setContentsMargins(0, 0, 0, 0);
     buttonRow->setSpacing(4);
     
     // "Show Untagged" button
@@ -416,7 +420,7 @@ void TagSidebar::setupUI()
     });
     buttonRow->addWidget(m_taggingModeButton);
     
-    layout->addLayout(buttonRow);
+    layout->addWidget(m_buttonRowContainer);
 
     // Search row
     m_searchEdit = new QLineEdit(this);
@@ -590,8 +594,10 @@ void TagSidebar::setupUI()
     m_selectionLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_selectionLabel);
 
-    // Set fixed width - narrower
-    setFixedWidth(200);
+    // Resizable width (the main window hosts this in a splitter so it can be
+    // dragged narrower/wider and snapped closed)
+    setMinimumWidth(160);
+    setMaximumWidth(420);
 
     // Style
     setStyleSheet("background-color: #1e1e1e;");
@@ -885,6 +891,20 @@ void TagSidebar::setTaggingModeActive(bool active)
     m_taggingModeButton->blockSignals(true);
     m_taggingModeButton->setChecked(active);
     m_taggingModeButton->blockSignals(false);
+}
+
+void TagSidebar::reclaimButtonRow()
+{
+    if (!m_buttonRowContainer || !m_mainLayout) {
+        return;
+    }
+    // If it currently lives elsewhere (e.g. the top bar), pull it back in just
+    // below the header row.
+    if (m_mainLayout->indexOf(m_buttonRowContainer) < 0) {
+        m_buttonRowContainer->setParent(this);
+        m_mainLayout->insertWidget(1, m_buttonRowContainer);
+    }
+    m_buttonRowContainer->show();
 }
 
 bool TagSidebar::handleHotkey(const QString& key)
